@@ -18,8 +18,14 @@ APP_SCRIPT = os.path.join(PROJECT_DIR, "app.py")
 # so check known install locations directly rather than trusting PATH
 # resolution. Each candidate is verified by actually importing webview
 # (see find_python below), so listing paths that don't apply on the current
-# OS is harmless — they're just skipped.
+# OS/setup are harmless — they're just skipped.
 PYTHON_CANDIDATES = [
+    # A project-local virtualenv, if one exists, takes priority over
+    # anything system-wide — this is also the standard workaround for
+    # PEP 668 ("externally-managed-environment") on modern Linux distros,
+    # which blocks plain `pip install` into the system Python entirely.
+    os.path.join(PROJECT_DIR, "venv", "bin", "python3"),
+    os.path.join(PROJECT_DIR, ".venv", "bin", "python3"),
     # macOS
     "/opt/homebrew/bin/python3",
     "/usr/local/bin/python3",

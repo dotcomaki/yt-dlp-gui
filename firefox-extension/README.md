@@ -20,7 +20,7 @@ Same behavior as the Chrome/Arc extension — clicking the toolbar icon on a You
    ```bash
    ./build.sh
    ```
-   Produces `ytdlp-gui.xpi` in this folder (a plain zip with the symlinked files resolved into real copies — Firefox's installer doesn't follow symlinks).
+   Produces `ytdlp-gui.xpi` in this folder (a plain zip with the symlinked files resolved into real copies — Firefox's installer doesn't follow symlinks). Needs the `zip` command — present by default on macOS, but not guaranteed on a minimal Linux install (`sudo apt install zip` or your distro's equivalent if `build.sh` reports it missing).
 
 5. **Install it**: `about:addons` → gear icon (⚙) → **Install Add-on From File...** → select `ytdlp-gui.xpi`. This persists across restarts, unlike the temporary-load method below.
 

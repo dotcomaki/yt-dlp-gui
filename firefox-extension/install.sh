@@ -38,9 +38,9 @@ case "$(uname -s)" in
     TARGET_DIR="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts"
     ;;
   Linux)
-    TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/native-messaging-hosts"
-    # Mozilla's own documented Linux location (not under XDG_CONFIG_HOME)
-    ALT_TARGET_DIR="$HOME/.mozilla/native-messaging-hosts"
+    # Mozilla hardcodes this per-user location on Linux — it does NOT
+    # follow XDG_CONFIG_HOME the way Chrome-family browsers do.
+    TARGET_DIR="$HOME/.mozilla/native-messaging-hosts"
     ;;
   *)
     echo "Unsupported OS: $(uname -s). This script covers macOS and Linux only."
@@ -51,11 +51,5 @@ esac
 mkdir -p "$TARGET_DIR"
 echo "$MANIFEST" > "$TARGET_DIR/$HOST_NAME.json"
 echo "Installed: $TARGET_DIR/$HOST_NAME.json"
-
-if [ -n "$ALT_TARGET_DIR" ]; then
-  mkdir -p "$ALT_TARGET_DIR"
-  echo "$MANIFEST" > "$ALT_TARGET_DIR/$HOST_NAME.json"
-  echo "Installed: $ALT_TARGET_DIR/$HOST_NAME.json"
-fi
 
 echo "Done. Fully quit and relaunch Firefox for the change to take effect."

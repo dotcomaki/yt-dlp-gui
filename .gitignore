@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 native-host/com.dotcomaki.ytdlpgui.json
 firefox-extension/*.xpi
+venv/
+.venv/

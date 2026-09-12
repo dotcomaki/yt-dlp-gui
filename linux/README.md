@@ -23,31 +23,35 @@ sudo dnf install python3-gobject gtk3 webkit2gtk4.1
 sudo pacman -S python-gobject gtk3 webkit2gtk-4.1
 ```
 
-**Qt (QtWebEngine) — alternative:**
+**Qt (QtWebEngine) — alternative:** install `PyQt5 PyQtWebEngine` inside the venv below, alongside `pywebview`, instead of the GTK packages above.
+
+Then install `pywebview` from the project root — **use a virtualenv**, not a plain `pip install`:
+
 ```bash
-pip install PyQt5 PyQtWebEngine
+cd ..   # project root
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Then install the Python packages as usual from the project root:
-```bash
-python3 -m pip install -r ../requirements.txt
-```
+Almost every current Linux distro's system Python enforces [PEP 668](https://peps.python.org/pep-0668/) and refuses a plain `pip install` outside a virtualenv (`error: externally-managed-environment`) — a venv is the standard, distro-blessed way around that, not a workaround specific to this project. **The browser extension auto-detects a `venv/` or `.venv/` folder in the project root**, so once it exists there's nothing extra to configure — the native messaging host picks it up automatically.
 
 ## ffmpeg and yt-dlp
 
+These are separate CLI tools, not Python packages, so they don't need the venv — install via your distro's package manager:
 ```bash
-sudo apt install ffmpeg      # or dnf/pacman equivalent
-python3 -m pip install --user yt-dlp   # or your distro's package
+sudo apt install ffmpeg yt-dlp      # or dnf/pacman equivalent
 ```
-`app.py` finds both automatically via `PATH`, so no extra config needed once they're installed.
+`app.py` looks for both on `PATH` plus a couple of common install locations (`/usr/bin`, `~/.local/bin` for a `pip install --user yt-dlp`), so either install method works.
 
 ## Running the app
 
-Same as macOS — from the project root:
+From the project root, with the venv active (`source venv/bin/activate`, if not already):
 ```bash
 python3 app.py
 python3 app.py "https://youtube.com/watch?v=..."   # pre-filled
 ```
+No need to activate anything for the browser extension's launches — `native-host/native_host.py` finds the `venv/` interpreter on its own.
 
 ## Browser extension
 

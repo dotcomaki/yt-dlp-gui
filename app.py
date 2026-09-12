@@ -13,7 +13,9 @@ import webview
 YTDLP_CANDIDATES = [
     shutil.which("yt-dlp"),
     "/usr/local/bin/yt-dlp",
-    os.path.expanduser("~/Downloads/yt-dlp_macos"),
+    os.path.expanduser("~/Downloads/yt-dlp_macos"),   # macOS manual download
+    "/usr/bin/yt-dlp",                                 # Linux distro package
+    os.path.expanduser("~/.local/bin/yt-dlp"),         # Linux `pip install --user`
 ]
 
 PROGRESS_RE = re.compile(
@@ -41,6 +43,8 @@ def find_ffmpeg():
         "/opt/homebrew/bin/ffmpeg" if os.path.isfile("/opt/homebrew/bin/ffmpeg") else None
     ) or (
         "/usr/local/bin/ffmpeg" if os.path.isfile("/usr/local/bin/ffmpeg") else None
+    ) or (
+        "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else None
     )
 
 

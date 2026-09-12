@@ -11,7 +11,7 @@ A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), 
 
 ## Requirements
 
-- Python 3.9+, `pywebview` (`pip install -r requirements.txt`) — **Linux only:** `pywebview` also needs a system-level GTK or Qt backend that pip can't provide; see [`linux/README.md`](linux/README.md#system-dependencies) before installing
+- Python 3.9+, `pywebview` (`pip install -r requirements.txt`) — **Linux only:** don't run that command as-is; `pywebview` needs a system-level GTK or Qt backend pip can't provide, and most distros now block a plain `pip install` outside a virtualenv anyway (PEP 668). See [`linux/README.md`](linux/README.md#system-dependencies) for the actual steps.
 - `ffmpeg` — required to merge separate video+audio streams; without it, downloads above 720p will have no audio. macOS: `brew install ffmpeg`. Linux: `sudo apt install ffmpeg` (or your distro's equivalent)
 - `yt-dlp` on your `PATH` (or, macOS only, at `/usr/local/bin/yt-dlp` or `~/Downloads/yt-dlp_macos`)
 
