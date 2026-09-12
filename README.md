@@ -1,5 +1,9 @@
 # yt-dlp GUI
 
+![Platform](https://img.shields.io/badge/platform-macOS-black?logo=apple&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)
+![yt-dlp](https://img.shields.io/badge/powered%20by-yt--dlp-red)
+
 A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with Python + [pywebview](https://pywebview.flowrl.com/). Includes a macOS app wrapper and a browser extension that sends the current YouTube tab straight to the app.
 
 ## Requirements
