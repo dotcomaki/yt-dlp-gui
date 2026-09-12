@@ -26,12 +26,20 @@ PYTHON_CANDIDATES = [
     # which blocks plain `pip install` into the system Python entirely.
     os.path.join(PROJECT_DIR, "venv", "bin", "python3"),
     os.path.join(PROJECT_DIR, ".venv", "bin", "python3"),
-    # macOS
-    "/opt/homebrew/bin/python3",
+    # macOS — /usr/local/bin/python3 and the pinned framework versions come
+    # before /opt/homebrew/bin/python3 deliberately: that symlink tracks
+    # whatever Homebrew's *default* python3 formula currently is, which
+    # drifts across major versions as Homebrew updates it (observed: it
+    # silently became 3.14, installed as some other formula's dependency,
+    # with no pywebview). Probing an interpreter we've never run before is
+    # exactly what can trigger a Gatekeeper "is damaged" first-launch
+    # dialog for something we don't even need — so check the stable,
+    # known-good locations first and only reach for the drifting one last.
     "/usr/local/bin/python3",
     "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
     "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
     "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+    "/opt/homebrew/bin/python3",
     # Linux (distro package managers put python3 on the system PATH more
     # consistently than macOS does, but check explicitly anyway)
     "/usr/bin/python3",
