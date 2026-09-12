@@ -1,18 +1,19 @@
 # yt-dlp GUI
 
 ![Platform](https://img.shields.io/badge/platform-macOS-black?logo=apple&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)
 ![yt-dlp](https://img.shields.io/badge/powered%20by-yt--dlp-red)
 
 A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with Python + [pywebview](https://pywebview.flowrl.com/). Includes a browser extension that sends the current YouTube tab straight to the app.
 
-**Platform:** macOS is primary and what's actually been tested. For Linux, see [`linux/README.md`](linux/README.md) — same app and extension, just a different native-messaging install step and an extra system dependency `pywebview` needs there (untested, written to spec).
+**Platform:** macOS is primary and what's actually been tested; Linux support exists but is untested (written to spec) — see [`linux/README.md`](linux/README.md) for Linux-specific setup (an extra system dependency `pywebview` needs, and Linux's native-messaging paths). Every section below is written for macOS unless a Linux note is called out inline.
 
 ## Requirements
 
-- Python 3.9+, `pywebview` (`pip install -r requirements.txt`)
-- `ffmpeg` (`brew install ffmpeg`) — required to merge separate video+audio streams; without it, downloads above 720p will have no audio
-- `yt-dlp` available at one of: `yt-dlp` on your `PATH`, `/usr/local/bin/yt-dlp`, or `~/Downloads/yt-dlp_macos`
+- Python 3.9+, `pywebview` (`pip install -r requirements.txt`) — **Linux only:** `pywebview` also needs a system-level GTK or Qt backend that pip can't provide; see [`linux/README.md`](linux/README.md#system-dependencies) before installing
+- `ffmpeg` — required to merge separate video+audio streams; without it, downloads above 720p will have no audio. macOS: `brew install ffmpeg`. Linux: `sudo apt install ffmpeg` (or your distro's equivalent)
+- `yt-dlp` on your `PATH` (or, macOS only, at `/usr/local/bin/yt-dlp` or `~/Downloads/yt-dlp_macos`)
 
 ## Run from source
 
@@ -23,19 +24,23 @@ python3 app.py
 
 Pass a URL as an argument to pre-fill it: `python3 app.py "https://youtube.com/watch?v=..."`.
 
-## Browser extension (Arc / Chrome)
+## Browser extension (Arc / Chrome on macOS; Chrome/Chromium/Brave/Edge/Vivaldi on Linux)
 
 Clicking the extension's toolbar icon on a YouTube page launches the yt-dlp GUI with that video's URL pre-filled. The icon is only enabled while you're on a `youtube.com` page.
 
-**How it works:** the extension talks to a native messaging host (`native-host/native_host.py`) registered with the browser, which runs `python3 app.py <url>` directly — no app bundle or install step involved. It checks a few common `python3` install locations and picks the first one that actually has `pywebview` installed, since apps launched outside an interactive shell get a more minimal `PATH` than your Terminal does.
+**How it works:** the extension talks to a native messaging host (`native-host/native_host.py`) registered with the browser, which runs `python3 app.py <url>` directly — no app bundle or install step involved. It checks a few common `python3` install locations (macOS and Linux) and picks the first one that actually has `pywebview` installed, since apps launched outside an interactive shell get a more minimal `PATH` than your Terminal does. This part of the code is shared across both platforms — only the install script below differs.
 
 **Setup:**
 
-1. Register the native messaging host for your browser(s):
+1. Register the native messaging host for your browser(s) — **macOS:**
    ```bash
    ./native-host/install.sh
    ```
-   This generates the host manifest with an absolute path to `native_host.py` on your machine (Chrome's native messaging spec requires an absolute path — there's no portable form) and installs it for every detected Chromium browser (Chrome, Arc, Brave, Edge, Chromium). The generated file itself isn't committed to git since it's machine-specific; re-run this script any time you re-clone or move the project.
+   **Linux:**
+   ```bash
+   ./linux/install.sh
+   ```
+   Each generates the host manifest with an absolute path to `native_host.py` on your machine (Chrome's native messaging spec requires an absolute path — there's no portable form) and installs it into every detected Chromium browser's config directory for that OS (macOS: `~/Library/Application Support/...`; Linux: `~/.config/...`). The generated file itself isn't committed to git since it's machine-specific; re-run the appropriate script any time you re-clone or move the project.
 2. Fully quit and relaunch your browser
 3. Go to `chrome://extensions` (works in Arc too), enable **Developer mode**, click **Load unpacked**, and select the `extension/` folder
 4. Pin the extension's icon to the toolbar
