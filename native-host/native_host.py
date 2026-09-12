@@ -16,9 +16,18 @@ APP_SCRIPT = os.path.join(PROJECT_DIR, "app.py")
 # get a minimal PATH that often resolves `python3` to the wrong interpreter
 # (e.g. Apple's Command Line Tools stub on macOS, which never has pywebview),
 # so check known install locations directly rather than trusting PATH
-# resolution. Each candidate is verified by actually importing webview
-# (see find_python below), so listing paths that don't apply on the current
-# OS/setup are harmless — they're just skipped.
+# resolution. Listing paths that don't apply on the current OS/setup is
+# harmless — they're just skipped by the existence check in find_python.
+#
+# find_python() deliberately does NOT execute any of these to verify
+# pywebview is importable (e.g. running `python3 -c "import webview"`).
+# That seems obvious for validation, but executing a binary that macOS
+# hasn't seen before is exactly what can trigger a Gatekeeper "is
+# damaged, move to Trash" dialog on first launch — observed repeatedly
+# even for candidates that would have passed the check. So this only
+# ever runs ONE interpreter, ever: whichever one is actually used to
+# launch app.py below. If that pick is wrong, app.py fails fast with a
+# normal ModuleNotFoundError instead of a silent/blocking OS dialog.
 PYTHON_CANDIDATES = [
     # A project-local virtualenv, if one exists, takes priority over
     # anything system-wide — this is also the standard workaround for
@@ -50,9 +59,7 @@ PYTHON_CANDIDATES = [
 def find_python():
     for path in PYTHON_CANDIDATES:
         if os.path.isfile(path) and os.access(path, os.X_OK):
-            check = subprocess.run([path, "-c", "import webview"], capture_output=True)
-            if check.returncode == 0:
-                return path
+            return path
     return shutil.which("python3") or "python3"
 
 
