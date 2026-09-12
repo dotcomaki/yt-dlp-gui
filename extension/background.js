@@ -3,6 +3,11 @@ const HOST_NAME = "com.dotcomaki.ytdlpgui";
 
 function updateActionForTab(tabId, url) {
   const isYouTube = !!url && YOUTUBE_PATTERN.test(url);
+  const suffix = isYouTube ? "" : "-disabled";
+  chrome.action.setIcon({
+    tabId,
+    path: { 16: `icon16${suffix}.png`, 48: `icon48${suffix}.png`, 128: `icon128${suffix}.png` },
+  });
   if (isYouTube) {
     chrome.action.enable(tabId);
   } else {
