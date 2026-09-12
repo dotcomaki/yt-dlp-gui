@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "yt-dlp Quick Download",
+  "version": "1.0",
+  "description": "Send the current YouTube video URL to the yt-dlp GUI app",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ytdlp-gui@dotcomaki.dev",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": ["nativeMessaging", "tabs", "activeTab"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "action": {
+    "default_title": "Send to yt-dlp",
+    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "background": {
+    "scripts": ["background.js"]
+  }
+}
