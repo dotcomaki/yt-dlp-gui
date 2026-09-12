@@ -13,15 +13,23 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_SCRIPT = os.path.join(PROJECT_DIR, "app.py")
 
 # Apps spawned outside an interactive shell (like this native messaging host)
-# get a minimal PATH that often resolves `python3` to Apple's Command Line
-# Tools stub instead of wherever pywebview is actually installed, so check
-# known install locations directly rather than trusting PATH resolution.
+# get a minimal PATH that often resolves `python3` to the wrong interpreter
+# (e.g. Apple's Command Line Tools stub on macOS, which never has pywebview),
+# so check known install locations directly rather than trusting PATH
+# resolution. Each candidate is verified by actually importing webview
+# (see find_python below), so listing paths that don't apply on the current
+# OS is harmless — they're just skipped.
 PYTHON_CANDIDATES = [
+    # macOS
     "/opt/homebrew/bin/python3",
     "/usr/local/bin/python3",
     "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
     "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
     "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+    # Linux (distro package managers put python3 on the system PATH more
+    # consistently than macOS does, but check explicitly anyway)
+    "/usr/bin/python3",
+    "/usr/local/bin/python3",
 ]
 
 

@@ -6,6 +6,8 @@
 
 A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with Python + [pywebview](https://pywebview.flowrl.com/). Includes a browser extension that sends the current YouTube tab straight to the app.
 
+**Platform:** macOS is primary and what's actually been tested. For Linux, see [`linux/README.md`](linux/README.md) — same app and extension, just a different native-messaging install step and an extra system dependency `pywebview` needs there (untested, written to spec).
+
 ## Requirements
 
 - Python 3.9+, `pywebview` (`pip install -r requirements.txt`)
