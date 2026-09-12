@@ -1,0 +1,912 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>yt-dlp</title>
+<style>
+  :root {
+    --bg-sidebar: #1c1c1e;
+    --bg-main: #161616;
+    --bg-panel: #202022;
+    --bg-field: #262628;
+    --border: #333335;
+    --text: #e4e4e6;
+    --text-dim: #8e8e93;
+    --text-faint: #626264;
+    --accent: #0a84ff;
+    --danger: #ff453a;
+    --success: #32d74b;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg-main);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .app {
+    display: flex;
+    height: 100%;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 168px;
+    flex-shrink: 0;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 14px 8px;
+  }
+
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 4px 10px 10px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+    margin-bottom: 1px;
+  }
+  .nav-item:hover { background: #2a2a2c; }
+  .nav-item.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  .nav-item .dot-icon {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+    opacity: 0.6;
+  }
+
+  .sidebar-spacer { flex: 1; }
+
+  .status-block {
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .status-line { display: flex; align-items: center; gap: 6px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
+  .status-dot.ok { background: var(--success); }
+  .status-dot.err { background: var(--danger); }
+
+  /* Main */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .panel {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    padding: 20px 24px;
+    overflow-y: auto;
+  }
+  .panel.active { display: flex; }
+
+  h2 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 16px;
+    color: var(--text);
+  }
+
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+  }
+  .hint {
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 4px;
+  }
+
+  input[type="text"], input[type="password"], input[type="number"], select, textarea {
+    width: 100%;
+    background: var(--bg-field);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    outline: none;
+    font-family: inherit;
+    user-select: text;
+  }
+  input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus,
+  select:focus, textarea:focus {
+    border-color: var(--accent);
+  }
+  textarea { resize: vertical; min-height: 50px; font-family: "SF Mono", ui-monospace, monospace; }
+
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .checkbox-row label { margin: 0; color: var(--text); font-size: 12.5px; }
+  input[type="checkbox"] {
+    width: 14px; height: 14px;
+    accent-color: var(--accent);
+  }
+
+  .field-row {
+    display: flex;
+    gap: 10px;
+  }
+  .field-row > .field { flex: 1; }
+
+  .folder-row { display: flex; gap: 8px; }
+  .folder-row input { flex: 1; }
+
+  button.plain-btn {
+    background: var(--bg-field);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  button.plain-btn:hover { background: #2d2d2f; }
+
+  .seg {
+    display: flex;
+    background: var(--bg-field);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .seg button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 6px 4px;
+    font-size: 12px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .seg button.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .btn-primary {
+    flex: 1;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 9px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    background: var(--accent);
+    cursor: pointer;
+  }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-cancel {
+    display: none;
+    border: 1px solid var(--border);
+    background: var(--bg-field);
+    color: var(--text-dim);
+    border-radius: 6px;
+    padding: 9px 16px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn-cancel.show { display: block; }
+
+  .progress-section { margin-top: 18px; }
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .meta-row .pct { color: var(--text); font-weight: 600; }
+
+  .progress-track {
+    height: 6px;
+    background: var(--bg-field);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.2s ease-out;
+  }
+
+  /* Advanced tab: fixed sub-nav + independently scrolling content, so
+     switching categories never changes the panel's height or stacks content. */
+  #tab-advanced.panel { padding: 0; overflow: hidden; }
+  .advanced-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .advanced-header h2 { margin: 0; }
+  .advanced-body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  .advanced-nav {
+    width: 172px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 10px 8px;
+  }
+  .advanced-nav .nav-item { font-size: 12.5px; }
+  .advanced-content {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 20px 24px;
+  }
+  .adv-category { display: none; }
+  .adv-category.active { display: block; }
+  .adv-category h3 {
+    font-size: 12.5px;
+    font-weight: 600;
+    margin: 0 0 14px;
+    color: var(--text);
+  }
+
+  .log {
+    flex: 1;
+    min-height: 0;
+    background: #0d0d0d;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-y: auto;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #b0b0b3;
+    user-select: text;
+  }
+  .log .err-line { color: var(--danger); }
+  .log .ok-line { color: var(--success); }
+  .log::-webkit-scrollbar { width: 8px; }
+  .log::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
+  .empty-log { color: var(--text-faint); font-style: italic; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <div class="sidebar-title">yt-dlp</div>
+      <div class="nav-item active" data-tab="download"><span class="dot-icon"></span>Download</div>
+      <div class="nav-item" data-tab="advanced"><span class="dot-icon"></span>Advanced</div>
+      <div class="nav-item" data-tab="log"><span class="dot-icon"></span>Log</div>
+      <div class="sidebar-spacer"></div>
+      <div class="status-block">
+        <div class="status-line"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
+        <div class="status-line"><span class="status-dot" id="ffmpegDot"></span><span id="ffmpegText">Checking ffmpeg…</span></div>
+      </div>
+    </div>
+
+    <div class="main">
+      <!-- Download tab -->
+      <div class="panel active" id="tab-download">
+        <h2>Download</h2>
+
+        <div class="field">
+          <label>URL</label>
+          <input type="text" id="urlInput" placeholder="https://youtube.com/watch?v=..." autofocus />
+        </div>
+
+        <div class="field">
+          <label>Quality</label>
+          <div class="seg" id="presetSeg">
+            <button data-preset="best" class="active">Best</button>
+            <button data-preset="720p">720p</button>
+            <button data-preset="480p">480p</button>
+            <button data-preset="audio">Audio only</button>
+            <button data-preset="custom">Custom</button>
+          </div>
+        </div>
+
+        <div class="field" id="customFormatField" style="display:none;">
+          <label>Custom format string (-f)</label>
+          <input type="text" id="customFormatInput" placeholder="e.g. bestvideo[ext=mp4]+bestaudio[ext=m4a]" />
+        </div>
+
+        <div class="field">
+          <label>Save to</label>
+          <div class="folder-row">
+            <input type="text" id="folderInput" readonly />
+            <button class="plain-btn" id="browseBtn">Browse…</button>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" id="downloadBtn">Download</button>
+          <button class="btn-cancel" id="cancelBtn">Cancel</button>
+        </div>
+
+        <div class="progress-section">
+          <div class="meta-row">
+            <span id="etaText">Idle</span>
+            <span class="pct" id="pctText">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Advanced tab -->
+      <div class="panel" id="tab-advanced">
+        <div class="advanced-header"><h2>Advanced options</h2></div>
+        <div class="advanced-body">
+          <div class="advanced-nav" id="advancedNav">
+            <div class="nav-item active" data-adv="format"><span class="dot-icon"></span>Format &amp; Quality</div>
+            <div class="nav-item" data-adv="filename"><span class="dot-icon"></span>Filename &amp; Output</div>
+            <div class="nav-item" data-adv="playlist"><span class="dot-icon"></span>Playlist</div>
+            <div class="nav-item" data-adv="subtitles"><span class="dot-icon"></span>Subtitles</div>
+            <div class="nav-item" data-adv="thumbnail"><span class="dot-icon"></span>Thumbnail &amp; Metadata</div>
+            <div class="nav-item" data-adv="audio"><span class="dot-icon"></span>Audio Extraction</div>
+            <div class="nav-item" data-adv="network"><span class="dot-icon"></span>Network</div>
+            <div class="nav-item" data-adv="auth"><span class="dot-icon"></span>Authentication &amp; Cookies</div>
+            <div class="nav-item" data-adv="sponsorblock"><span class="dot-icon"></span>SponsorBlock</div>
+            <div class="nav-item" data-adv="geo"><span class="dot-icon"></span>Geo-restriction</div>
+            <div class="nav-item" data-adv="postrun"><span class="dot-icon"></span>Post-run Command</div>
+            <div class="nav-item" data-adv="debug"><span class="dot-icon"></span>Debug &amp; Logging</div>
+            <div class="nav-item" data-adv="extra"><span class="dot-icon"></span>Extra Arguments</div>
+          </div>
+
+          <div class="advanced-content">
+            <div class="adv-category active" id="adv-format">
+              <h3>Format &amp; Quality</h3>
+              <div class="field-row">
+                <div class="field">
+                  <label>Merge output format</label>
+                  <select data-bind="format.mergeOutputFormat">
+                    <option value="mp4">mp4</option>
+                    <option value="mkv">mkv</option>
+                    <option value="webm">webm</option>
+                    <option value="none">Don't force</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Recode video to</label>
+                  <select data-bind="format.recodeVideo">
+                    <option value="none">Don't recode</option>
+                    <option value="mp4">mp4</option>
+                    <option value="mkv">mkv</option>
+                    <option value="webm">webm</option>
+                    <option value="avi">avi</option>
+                    <option value="mov">mov</option>
+                  </select>
+                </div>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-preferFree" data-bind="format.preferFreeFormats" />
+                <label for="cb-preferFree">Prefer free formats (webm/ogg) over proprietary</label>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-filename">
+              <h3>Filename &amp; Output</h3>
+              <div class="field">
+                <label>Output filename template</label>
+                <input type="text" data-bind="filename.template" placeholder="%(title)s.%(ext)s" />
+                <div class="hint">yt-dlp output template syntax, e.g. %(uploader)s/%(title)s.%(ext)s</div>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-restrict" data-bind="filename.restrict" />
+                <label for="cb-restrict">Restrict filenames to ASCII</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-noOverwrite" data-bind="filename.noOverwrites" />
+                <label for="cb-noOverwrite">Don't overwrite existing files</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-winNames" data-bind="filename.windowsFilenames" />
+                <label for="cb-winNames">Force Windows-compatible filenames</label>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-playlist">
+              <h3>Playlist</h3>
+              <div class="field-row">
+                <div class="field">
+                  <label>Playlist items</label>
+                  <input type="text" data-bind="playlist.items" placeholder="e.g. 1-3,7" />
+                </div>
+                <div class="field">
+                  <label>Max downloads</label>
+                  <input type="text" data-bind="playlist.maxDownloads" placeholder="unlimited" />
+                </div>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-noPlaylist" data-bind="playlist.noPlaylist" />
+                <label for="cb-noPlaylist">Only download the single video, not the playlist</label>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-subtitles">
+              <h3>Subtitles</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-writeSubs" data-bind="subtitles.write" />
+                <label for="cb-writeSubs">Write subtitle file</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-writeAutoSubs" data-bind="subtitles.writeAuto" />
+                <label for="cb-writeAutoSubs">Write auto-generated subtitles</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-embedSubs" data-bind="subtitles.embed" />
+                <label for="cb-embedSubs">Embed subtitles in video file</label>
+              </div>
+              <div class="field">
+                <label>Subtitle languages</label>
+                <input type="text" data-bind="subtitles.langs" placeholder="en,es" />
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-thumbnail">
+              <h3>Thumbnail &amp; Metadata</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-writeThumb" data-bind="thumbnail.write" />
+                <label for="cb-writeThumb">Write thumbnail to disk</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-embedThumb" data-bind="thumbnail.embed" />
+                <label for="cb-embedThumb">Embed thumbnail in file</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-addMeta" data-bind="thumbnail.addMetadata" />
+                <label for="cb-addMeta">Add metadata to file</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-embedChapters" data-bind="thumbnail.embedChapters" />
+                <label for="cb-embedChapters">Embed chapters</label>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-audio">
+              <h3>Audio Extraction</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-extractAudio" data-bind="audio.extractAudio" />
+                <label for="cb-extractAudio">Extract audio only (same as Quality → Audio only)</label>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Audio format</label>
+                  <select data-bind="audio.audioFormat">
+                    <option value="mp3">mp3</option>
+                    <option value="m4a">m4a</option>
+                    <option value="opus">opus</option>
+                    <option value="flac">flac</option>
+                    <option value="wav">wav</option>
+                    <option value="vorbis">vorbis</option>
+                    <option value="aac">aac</option>
+                    <option value="best">best (no conversion)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Audio quality</label>
+                  <input type="text" data-bind="audio.audioQuality" placeholder="0 (best) – 9, or 128K" />
+                </div>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-keepVideo" data-bind="audio.keepVideo" />
+                <label for="cb-keepVideo">Keep original video file after extracting audio</label>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-network">
+              <h3>Network</h3>
+              <div class="field-row">
+                <div class="field">
+                  <label>Proxy URL</label>
+                  <input type="text" data-bind="network.proxy" placeholder="socks5://127.0.0.1:9050" />
+                </div>
+                <div class="field">
+                  <label>Rate limit</label>
+                  <input type="text" data-bind="network.rateLimit" placeholder="e.g. 1M" />
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Retries</label>
+                  <input type="text" data-bind="network.retries" placeholder="10" />
+                </div>
+                <div class="field">
+                  <label>Socket timeout (s)</label>
+                  <input type="text" data-bind="network.socketTimeout" placeholder="20" />
+                </div>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-ipv4" data-bind="network.forceIpv4" />
+                <label for="cb-ipv4">Force IPv4</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-ipv6" data-bind="network.forceIpv6" />
+                <label for="cb-ipv6">Force IPv6</label>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-auth">
+              <h3>Authentication &amp; Cookies</h3>
+              <div class="field-row">
+                <div class="field">
+                  <label>Username</label>
+                  <input type="text" data-bind="auth.username" />
+                </div>
+                <div class="field">
+                  <label>Password</label>
+                  <input type="password" data-bind="auth.password" />
+                </div>
+              </div>
+              <div class="field">
+                <label>Cookies file</label>
+                <div class="folder-row">
+                  <input type="text" data-bind="auth.cookiesFile" placeholder="cookies.txt" />
+                  <button class="plain-btn" id="cookiesBrowseBtn">Browse…</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Cookies from browser</label>
+                <select data-bind="auth.cookiesFromBrowser">
+                  <option value="none">None</option>
+                  <option value="chrome">Chrome</option>
+                  <option value="brave">Brave</option>
+                  <option value="chromium">Chromium</option>
+                  <option value="edge">Edge</option>
+                  <option value="firefox">Firefox</option>
+                  <option value="opera">Opera</option>
+                  <option value="safari">Safari</option>
+                  <option value="vivaldi">Vivaldi</option>
+                  <option value="whale">Whale</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-sponsorblock">
+              <h3>SponsorBlock</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-sbMark" data-bind="sponsorblock.mark" />
+                <label for="cb-sbMark">Mark sponsor segments as chapters</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-sbRemove" data-bind="sponsorblock.remove" />
+                <label for="cb-sbRemove">Remove sponsor segments from file</label>
+              </div>
+              <div class="field">
+                <label>Categories</label>
+                <input type="text" data-bind="sponsorblock.categories" placeholder="all" />
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-geo">
+              <h3>Geo-restriction</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-geoBypass" data-bind="geo.bypass" />
+                <label for="cb-geoBypass">Bypass geo-restriction</label>
+              </div>
+              <div class="field">
+                <label>Bypass country code</label>
+                <input type="text" data-bind="geo.bypassCountry" placeholder="US" />
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-postrun">
+              <h3>Post-run Command</h3>
+              <div class="field">
+                <label>Run command after each download</label>
+                <input type="text" data-bind="postrun.exec" placeholder="e.g. open {}" />
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-debug">
+              <h3>Debug &amp; Logging</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-verbose" data-bind="debug.verbose" />
+                <label for="cb-verbose">Verbose output</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-simulate" data-bind="debug.simulate" />
+                <label for="cb-simulate">Simulate only — don't download</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-ignoreErrors" data-bind="debug.ignoreErrors" />
+                <label for="cb-ignoreErrors">Ignore errors and continue</label>
+              </div>
+            </div>
+
+            <div class="adv-category" id="adv-extra">
+              <h3>Extra Arguments</h3>
+              <div class="field">
+                <label>Raw yt-dlp arguments (appended verbatim)</label>
+                <textarea data-bind="extraArgs" placeholder="--write-info-json --no-mtime"></textarea>
+                <div class="hint">Anything not covered above — passed straight to the yt-dlp command line.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log tab -->
+      <div class="panel" id="tab-log">
+        <h2>Log</h2>
+        <div class="log" id="logBox"><span class="empty-log">Logs will appear here once a download starts…</span></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const settings = {
+    preset: 'best',
+    format: { customFormat: '', mergeOutputFormat: 'mp4', recodeVideo: 'none', preferFreeFormats: false },
+    filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false },
+    playlist: { items: '', noPlaylist: false, maxDownloads: '' },
+    subtitles: { write: false, writeAuto: false, langs: 'en', embed: false },
+    thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false },
+    audio: { extractAudio: false, audioFormat: 'mp3', audioQuality: '', keepVideo: false },
+    network: { proxy: '', rateLimit: '', retries: '', socketTimeout: '', forceIpv4: false, forceIpv6: false },
+    auth: { username: '', password: '', cookiesFile: '', cookiesFromBrowser: 'none' },
+    sponsorblock: { mark: false, remove: false, categories: 'all' },
+    geo: { bypass: false, bypassCountry: '' },
+    postrun: { exec: '' },
+    debug: { verbose: false, simulate: false, ignoreErrors: false },
+    extraArgs: '',
+  };
+
+  function getPath(obj, path) {
+    return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+  }
+  function setPath(obj, path, value) {
+    const keys = path.split('.');
+    const last = keys.pop();
+    const target = keys.reduce((o, k) => o[k], obj);
+    target[last] = value;
+  }
+
+  function bindInputs() {
+    document.querySelectorAll('[data-bind]').forEach(el => {
+      const path = el.dataset.bind;
+      const val = getPath(settings, path);
+      if (el.type === 'checkbox') el.checked = !!val;
+      else el.value = val ?? '';
+
+      const handler = () => {
+        const v = el.type === 'checkbox' ? el.checked : el.value;
+        setPath(settings, path, v);
+        if (path === 'audio.extractAudio') syncPresetFromAudioCheckbox();
+      };
+      el.addEventListener('input', handler);
+      el.addEventListener('change', handler);
+    });
+  }
+
+  function refreshBoundInput(path) {
+    const el = document.querySelector(`[data-bind="${path}"]`);
+    if (!el) return;
+    const val = getPath(settings, path);
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val ?? '';
+  }
+
+  function syncPresetFromAudioCheckbox() {
+    if (settings.audio.extractAudio && settings.preset !== 'audio') {
+      selectPreset('audio');
+    }
+  }
+
+  // Tab navigation (scoped to the top-level sidebar only — the Advanced
+  // sub-nav below also uses .nav-item for styling but is handled separately)
+  document.querySelectorAll('.sidebar > .nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      document.querySelectorAll('.sidebar > .nav-item').forEach(i => i.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      item.classList.add('active');
+      document.getElementById('tab-' + item.dataset.tab).classList.add('active');
+    });
+  });
+
+  // Advanced sub-navigation (one category visible at a time, independent scroll)
+  document.getElementById('advancedNav').addEventListener('click', (e) => {
+    const item = e.target.closest('.nav-item');
+    if (!item) return;
+    document.querySelectorAll('#advancedNav .nav-item').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.adv-category').forEach(c => c.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById('adv-' + item.dataset.adv).classList.add('active');
+  });
+
+  // Quality preset
+  const presetSeg = document.getElementById('presetSeg');
+  const customFormatField = document.getElementById('customFormatField');
+  const customFormatInput = document.getElementById('customFormatInput');
+
+  function selectPreset(preset) {
+    settings.preset = preset;
+    [...presetSeg.children].forEach(b => b.classList.toggle('active', b.dataset.preset === preset));
+    customFormatField.style.display = preset === 'custom' ? 'block' : 'none';
+    settings.audio.extractAudio = preset === 'audio';
+    refreshBoundInput('audio.extractAudio');
+  }
+
+  presetSeg.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') return;
+    selectPreset(e.target.dataset.preset);
+  });
+
+  customFormatInput.addEventListener('input', () => {
+    settings.format.customFormat = customFormatInput.value;
+  });
+
+  // Folder / file pickers
+  const folderInput = document.getElementById('folderInput');
+  document.getElementById('browseBtn').addEventListener('click', async () => {
+    const folder = await window.pywebview.api.choose_folder();
+    if (folder) folderInput.value = folder;
+  });
+  document.getElementById('cookiesBrowseBtn').addEventListener('click', async () => {
+    const file = await window.pywebview.api.choose_file();
+    if (file) {
+      settings.auth.cookiesFile = file;
+      refreshBoundInput('auth.cookiesFile');
+    }
+  });
+
+  // Download flow
+  const downloadBtn = document.getElementById('downloadBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const progressFill = document.getElementById('progressFill');
+  const pctText = document.getElementById('pctText');
+  const etaText = document.getElementById('etaText');
+  const logBox = document.getElementById('logBox');
+  let logStarted = false;
+
+  function appendLog(text, cls) {
+    if (!logStarted) { logBox.innerHTML = ''; logStarted = true; }
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = text;
+    logBox.appendChild(line);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  function setDownloading(state) {
+    downloadBtn.disabled = state;
+    downloadBtn.textContent = state ? 'Downloading…' : 'Download';
+    cancelBtn.classList.toggle('show', state);
+  }
+
+  downloadBtn.addEventListener('click', async () => {
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) { appendLog('Please enter a URL.', 'err-line'); return; }
+    setDownloading(true);
+    progressFill.style.width = '0%';
+    pctText.textContent = '0%';
+    etaText.textContent = 'Starting…';
+    logStarted = false;
+    logBox.innerHTML = '';
+    await window.pywebview.api.start_download(url, settings, folderInput.value);
+  });
+
+  cancelBtn.addEventListener('click', async () => {
+    await window.pywebview.api.cancel_download();
+    etaText.textContent = 'Cancelling…';
+  });
+
+  window.addEventListener('ytdlp-log', (e) => appendLog(e.detail.line));
+
+  window.addEventListener('ytdlp-progress', (e) => {
+    const { pct, size, speed, eta } = e.detail;
+    progressFill.style.width = pct + '%';
+    pctText.textContent = pct.toFixed(1) + '%';
+    etaText.textContent = `${size || ''} ${speed ? '· ' + speed : ''} ${eta ? '· ETA ' + eta : ''}`.trim();
+  });
+
+  window.addEventListener('ytdlp-done', (e) => {
+    setDownloading(false);
+    const { success, cancelled } = e.detail;
+    if (cancelled) {
+      appendLog('Download cancelled.', 'err-line');
+      etaText.textContent = 'Cancelled';
+    } else if (success) {
+      progressFill.style.width = '100%';
+      pctText.textContent = '100%';
+      etaText.textContent = 'Done';
+      appendLog('Download complete.', 'ok-line');
+    } else {
+      etaText.textContent = 'Failed';
+      appendLog('Download failed. Check the Log tab for details.', 'err-line');
+    }
+  });
+
+  window.addEventListener('ytdlp-error', (e) => {
+    setDownloading(false);
+    appendLog('Error: ' + e.detail.message, 'err-line');
+    etaText.textContent = 'Error';
+  });
+
+  async function init() {
+    bindInputs();
+
+    const prefillUrl = new URLSearchParams(window.location.search).get('url');
+    if (prefillUrl) {
+      document.getElementById('urlInput').value = prefillUrl;
+    }
+
+    try {
+      folderInput.value = await window.pywebview.api.default_folder();
+    } catch (err) {}
+
+    try {
+      const info = await window.pywebview.api.check_binary();
+      const ytdlpDot = document.getElementById('ytdlpDot');
+      const ytdlpText = document.getElementById('ytdlpText');
+      if (info.found) {
+        ytdlpDot.classList.add('ok');
+        ytdlpText.textContent = 'yt-dlp ' + (info.version || '');
+      } else {
+        ytdlpDot.classList.add('err');
+        ytdlpText.textContent = 'yt-dlp not found';
+      }
+      const ffmpegDot = document.getElementById('ffmpegDot');
+      const ffmpegText = document.getElementById('ffmpegText');
+      if (info.ffmpeg) {
+        ffmpegDot.classList.add('ok');
+        ffmpegText.textContent = 'ffmpeg found';
+      } else {
+        ffmpegDot.classList.add('err');
+        ffmpegText.textContent = 'ffmpeg missing';
+      }
+    } catch (err) {
+      document.getElementById('ytdlpText').textContent = 'Backend not ready';
+    }
+  }
+
+  window.addEventListener('pywebviewready', init);
+</script>
+</body>
+</html>

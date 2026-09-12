@@ -1,0 +1,34 @@
+#!/bin/bash
+# Self-locating launcher: resolves symlinks so this works whether the
+# bundle is run in place or symlinked into /Applications, with no
+# hardcoded path to this checkout.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PROJECT_DIR="$(cd "$DIR/../../.." && pwd)"
+cd "$PROJECT_DIR"
+
+# Prefer a python3 that actually has pywebview installed. The GUI launch
+# environment's PATH often excludes Homebrew/python.org install dirs (only
+# Apple's own stub is guaranteed), which silently breaks `import webview`.
+PYBIN=""
+for CANDIDATE in \
+  /opt/homebrew/bin/python3 \
+  /usr/local/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+do
+  if [ -x "$CANDIDATE" ] && "$CANDIDATE" -c "import webview" 2>/dev/null; then
+    PYBIN="$CANDIDATE"
+    break
+  fi
+done
+if [ -z "$PYBIN" ]; then
+  PYBIN="$(command -v python3)"
+fi
+exec "$PYBIN" app.py "$@"

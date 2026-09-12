@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "yt-dlp Quick Download",
+  "version": "1.0",
+  "description": "Send the current YouTube video URL to the yt-dlp GUI app",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0r/rvVv5cofFX/ITQayIXd7BdV/Bc4LKDiDrqdvVqI7Z+k5XUmSxQnvLpMAM/w05nNRSW+Mh0W9MyPSwuL8aSXSLbQJknm5Ek1rW4FION+6sRQNdYaq9/Zdj+lT7GHygfBbF/dbw4b2sVlu0KKqlCC76Xrtx9ToseHMxGaO+YSncK3Zb90SLy5jiIuULigEna9PerLpUpd5ctVYjVilwoUEMo8RfJCu5nW1KLOttt2KBAm/YSMshKF5vjkjZ60LUldUX9ucsInV6odHh+Rq6cDWdh2pQ+axS8ov+luJrcj0wcPVPsYqm5L9j+p9Bdz0dRkiPIKsaZVaGZkreZ72zxwIDAQAB",
+  "permissions": ["nativeMessaging", "tabs", "activeTab"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "action": {
+    "default_title": "Send to yt-dlp",
+    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
