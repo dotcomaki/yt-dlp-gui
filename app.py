@@ -48,6 +48,13 @@ def find_ffmpeg():
     )
 
 
+def settings_path():
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    config_dir = os.path.join(config_home, "ytdlp-gui")
+    os.makedirs(config_dir, exist_ok=True)
+    return os.path.join(config_dir, "settings.json")
+
+
 def build_args(binary, settings, dest):
     """Translate the settings dict from the UI into a yt-dlp argv list."""
     preset = settings.get("preset", "best")
@@ -213,6 +220,29 @@ class Api:
 
     def default_folder(self):
         return os.path.expanduser("~/Downloads")
+
+    def load_settings(self):
+        try:
+            with open(settings_path()) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    def save_settings(self, payload):
+        # Never persist the password field to disk in plaintext.
+        settings = payload.get("settings", {})
+        auth = settings.get("auth")
+        if isinstance(auth, dict):
+            auth = dict(auth)
+            auth["password"] = ""
+            settings = dict(settings, auth=auth)
+            payload = dict(payload, settings=settings)
+        try:
+            with open(settings_path(), "w") as f:
+                json.dump(payload, f, indent=2)
+            return True
+        except Exception:
+            return False
 
     def check_binary(self):
         path = find_ytdlp()

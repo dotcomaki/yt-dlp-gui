@@ -708,6 +708,33 @@
     target[last] = value;
   }
 
+  // Merges saved values onto the current defaults, keyed off the
+  // defaults' own shape — missing/extra/mistyped keys in a settings
+  // file from an older version of the app are silently ignored rather
+  // than crashing or clobbering a field with the wrong type.
+  function deepMerge(target, source) {
+    if (typeof source !== 'object' || source === null) return target;
+    for (const key of Object.keys(target)) {
+      if (!(key in source)) continue;
+      const sVal = source[key];
+      const tVal = target[key];
+      if (tVal && typeof tVal === 'object' && !Array.isArray(tVal) && sVal && typeof sVal === 'object') {
+        deepMerge(tVal, sVal);
+      } else if (typeof sVal === typeof tVal) {
+        target[key] = sVal;
+      }
+    }
+    return target;
+  }
+
+  let saveTimer = null;
+  function saveSettings() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      window.pywebview.api.save_settings({ settings, destFolder: folderInput.value });
+    }, 400);
+  }
+
   function bindInputs() {
     document.querySelectorAll('[data-bind]').forEach(el => {
       const path = el.dataset.bind;
@@ -719,6 +746,7 @@
         const v = el.type === 'checkbox' ? el.checked : el.value;
         setPath(settings, path, v);
         if (path === 'audio.extractAudio') syncPresetFromAudioCheckbox();
+        saveSettings();
       };
       el.addEventListener('input', handler);
       el.addEventListener('change', handler);
@@ -765,12 +793,13 @@
   const customFormatField = document.getElementById('customFormatField');
   const customFormatInput = document.getElementById('customFormatInput');
 
-  function selectPreset(preset) {
+  function selectPreset(preset, skipSave) {
     settings.preset = preset;
     [...presetSeg.children].forEach(b => b.classList.toggle('active', b.dataset.preset === preset));
     customFormatField.style.display = preset === 'custom' ? 'block' : 'none';
     settings.audio.extractAudio = preset === 'audio';
     refreshBoundInput('audio.extractAudio');
+    if (!skipSave) saveSettings();
   }
 
   presetSeg.addEventListener('click', (e) => {
@@ -780,19 +809,21 @@
 
   customFormatInput.addEventListener('input', () => {
     settings.format.customFormat = customFormatInput.value;
+    saveSettings();
   });
 
   // Folder / file pickers
   const folderInput = document.getElementById('folderInput');
   document.getElementById('browseBtn').addEventListener('click', async () => {
     const folder = await window.pywebview.api.choose_folder();
-    if (folder) folderInput.value = folder;
+    if (folder) { folderInput.value = folder; saveSettings(); }
   });
   document.getElementById('cookiesBrowseBtn').addEventListener('click', async () => {
     const file = await window.pywebview.api.choose_file();
     if (file) {
       settings.auth.cookiesFile = file;
       refreshBoundInput('auth.cookiesFile');
+      saveSettings();
     }
   });
 
@@ -870,7 +901,18 @@
   });
 
   async function init() {
+    let savedDestFolder = null;
+    try {
+      const saved = await window.pywebview.api.load_settings();
+      if (saved && saved.settings) {
+        deepMerge(settings, saved.settings);
+        savedDestFolder = saved.destFolder || null;
+      }
+    } catch (err) {}
+
     bindInputs();
+    selectPreset(settings.preset, /* skipSave */ true);
+    customFormatInput.value = settings.format.customFormat || '';
 
     const prefillUrl = new URLSearchParams(window.location.search).get('url');
     if (prefillUrl) {
@@ -878,7 +920,7 @@
     }
 
     try {
-      folderInput.value = await window.pywebview.api.default_folder();
+      folderInput.value = savedDestFolder || await window.pywebview.api.default_folder();
     } catch (err) {}
 
     try {
