@@ -36,6 +36,7 @@ TARGETS=(
   "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
   "$HOME/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
   "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
+  "$HOME/Library/Application Support/Vivaldi/NativeMessagingHosts"
 )
 
 INSTALLED=0
@@ -49,7 +50,7 @@ for TARGET_DIR in "${TARGETS[@]}"; do
 done
 
 if [ "$INSTALLED" -eq 0 ]; then
-  echo "No supported Chromium-based browser found (Chrome, Arc, Brave, Edge, Chromium)."
+  echo "No supported Chromium-based browser found (Chrome, Arc, Brave, Edge, Chromium, Vivaldi)."
   exit 1
 fi
 

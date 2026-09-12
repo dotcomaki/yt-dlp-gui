@@ -24,7 +24,7 @@ python3 app.py
 
 Pass a URL as an argument to pre-fill it: `python3 app.py "https://youtube.com/watch?v=..."`.
 
-## Browser extension (Arc / Chrome on macOS; Chrome/Chromium/Brave/Edge/Vivaldi on Linux; Firefox — see below)
+## Browser extension (Chrome/Arc/Brave/Edge/Chromium/Vivaldi on macOS; Chrome/Chromium/Brave/Edge/Vivaldi on Linux; Firefox — see below)
 
 Clicking the extension's toolbar icon on a YouTube page launches the yt-dlp GUI with that video's URL pre-filled. The icon is only enabled while you're on a `youtube.com` page.
 
@@ -42,7 +42,7 @@ Clicking the extension's toolbar icon on a YouTube page launches the yt-dlp GUI 
    ```
    Each generates the host manifest with an absolute path to `native_host.py` on your machine (Chrome's native messaging spec requires an absolute path — there's no portable form) and installs it into every detected Chromium browser's config directory for that OS (macOS: `~/Library/Application Support/...`; Linux: `~/.config/...`). The generated file itself isn't committed to git since it's machine-specific; re-run the appropriate script any time you re-clone or move the project.
 2. Fully quit and relaunch your browser
-3. Go to `chrome://extensions` (works in Arc too), enable **Developer mode**, click **Load unpacked**, and select the `extension/` folder
+3. Go to `chrome://extensions` (this URL works in every Chromium-based browser, not just Chrome — Arc, Brave, Edge, Vivaldi too), enable **Developer mode**, click **Load unpacked**, and select the `extension/` folder
 4. Pin the extension's icon to the toolbar
 
 The extension's `manifest.json` embeds a fixed signing key so its ID is always `palmchbgajiepnoehdaapiocpkglhabf`, matching what `install.sh` writes into the host manifest's `allowed_origins` — no manual ID copying needed.
