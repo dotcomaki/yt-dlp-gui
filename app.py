@@ -67,6 +67,16 @@ def build_args(binary, settings, dest):
 
     args = [binary, "--newline"]
 
+    # yt-dlp does its own PATH search for ffmpeg at postprocessing time —
+    # it doesn't share find_ffmpeg()'s result just because we found it.
+    # Under the browser extension, the inherited PATH is minimal enough
+    # that yt-dlp's own search fails even when ours succeeds (e.g. ffmpeg
+    # installed via Homebrew at /opt/homebrew/bin, which isn't on that
+    # minimal PATH), so tell it explicitly where ffmpeg lives.
+    ffmpeg_path = find_ffmpeg()
+    if ffmpeg_path:
+        args += ["--ffmpeg-location", ffmpeg_path]
+
     # --- filename / output template ---
     template = (filename.get("template") or "%(title)s.%(ext)s").strip()
     args += ["-o", os.path.join(dest, template)]
