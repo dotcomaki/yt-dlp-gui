@@ -3,11 +3,13 @@
 and opens the yt-dlp GUI app with that URL pre-filled."""
 
 import json
+import os
 import struct
 import subprocess
 import sys
 
-APP_PATH = "/Applications/yt-dlp.app"
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_PATH = os.path.join(PROJECT_DIR, "yt-dlp.app")
 
 
 def read_message():
