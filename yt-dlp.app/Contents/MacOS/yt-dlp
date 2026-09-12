@@ -1,0 +1,46 @@
+#!/bin/bash
+# Self-locating launcher (resolves symlinks) — no hardcoded path to this
+# checkout, and lives inside the project folder rather than requiring an
+# /Applications install. Used specifically so the browser extension can
+# launch via `open -a` instead of spawning python3 as a direct child of
+# the native messaging host: a direct child inherits the browser's
+# process ancestry for macOS's Gatekeeper "responsible launcher"
+# tracking, which can trigger a false-positive "is damaged" dialog
+# blaming the browser for a file it never touched. `open -a` hands the
+# launch off to LaunchServices as an independent process, breaking that
+# ancestry chain.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PROJECT_DIR="$(cd "$DIR/../../.." && pwd)"
+cd "$PROJECT_DIR"
+
+# Existence check only — deliberately does NOT execute any candidate to
+# verify pywebview is importable (e.g. `python3 -c "import webview"`).
+# Executing a binary macOS hasn't seen before is itself what can trigger
+# a Gatekeeper first-launch dialog, so this only ever runs ONE
+# interpreter: whichever one actually launches app.py below. A wrong
+# pick fails fast with an ordinary ModuleNotFoundError instead.
+PYBIN=""
+for CANDIDATE in \
+  "$PROJECT_DIR/venv/bin/python3" \
+  "$PROJECT_DIR/.venv/bin/python3" \
+  /usr/local/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 \
+  /opt/homebrew/bin/python3
+do
+  if [ -x "$CANDIDATE" ]; then
+    PYBIN="$CANDIDATE"
+    break
+  fi
+done
+if [ -z "$PYBIN" ]; then
+  PYBIN="$(command -v python3)"
+fi
+exec "$PYBIN" app.py "$@"

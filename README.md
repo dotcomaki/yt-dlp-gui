@@ -28,7 +28,9 @@ Pass a URL as an argument to pre-fill it: `python3 app.py "https://youtube.com/w
 
 Clicking the extension's toolbar icon on a YouTube page launches the yt-dlp GUI with that video's URL pre-filled. The icon is only enabled while you're on a `youtube.com` page.
 
-**How it works:** the extension talks to a native messaging host (`native-host/native_host.py`) registered with the browser, which runs `python3 app.py <url>` directly — no app bundle or install step involved. It checks a few common `python3` install locations (macOS and Linux) and picks the first one that actually has `pywebview` installed, since apps launched outside an interactive shell get a more minimal `PATH` than your Terminal does. This part of the code is shared across both platforms — only the install script below differs.
+**How it works:** the extension talks to a native messaging host (`native-host/native_host.py`) registered with the browser.
+- **macOS:** launches via `open -a yt-dlp.app --args <url>` — a small self-locating app bundle checked into the repo (no `/Applications` install needed). This matters, not just for convenience: spawning `python3` as a *direct child* of the native messaging host inherits the browser's process ancestry for macOS's Gatekeeper "responsible launcher" tracking, which can trigger a false-positive "is damaged, move to Trash" dialog blaming the browser for a file it never touched — even for a correctly-signed, unquarantined interpreter. `open -a` hands the launch to LaunchServices as an independent process, breaking that ancestry chain.
+- **Linux:** runs `python3 app.py <url>` directly (no such Gatekeeper-equivalent issue exists there). Checks a few common `python3` install locations and picks the first one that actually has `pywebview` installed, since apps launched outside an interactive shell get a more minimal `PATH` than your Terminal does.
 
 **Setup:**
 

@@ -4,6 +4,7 @@ and launches the yt-dlp GUI with that URL pre-filled."""
 
 import json
 import os
+import platform
 import shutil
 import struct
 import subprocess
@@ -11,6 +12,7 @@ import sys
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_SCRIPT = os.path.join(PROJECT_DIR, "app.py")
+APP_BUNDLE = os.path.join(PROJECT_DIR, "yt-dlp.app")
 
 # Apps spawned outside an interactive shell (like this native messaging host)
 # get a minimal PATH that often resolves `python3` to the wrong interpreter
@@ -79,20 +81,41 @@ def send_message(obj):
     sys.stdout.buffer.flush()
 
 
+def launch(url):
+    # macOS: hand the launch off to LaunchServices via `open -a` instead of
+    # spawning python3 as a direct child of this process. A direct child
+    # inherits the browser's process ancestry for macOS's Gatekeeper
+    # "responsible launcher" tracking, which can trigger a false-positive
+    # "is damaged, move to Trash" dialog blaming the browser for a file it
+    # never touched — observed even with a known-good, unquarantined
+    # interpreter. `open -a` launches the app as an independent process,
+    # breaking that ancestry chain. Requires yt-dlp.app to exist (it's a
+    # thin, self-locating wrapper checked into the repo, no /Applications
+    # install needed).
+    if platform.system() == "Darwin" and os.path.isdir(APP_BUNDLE):
+        subprocess.Popen(["open", "-a", APP_BUNDLE, "--args", url])
+        return
+
+    # Linux (and a macOS fallback if yt-dlp.app is somehow missing): spawn
+    # python3 directly. There's no LaunchServices/Gatekeeper-ancestry
+    # equivalent on Linux, so this doesn't have the same failure mode.
+    python_bin = find_python()
+    subprocess.Popen(
+        [python_bin, APP_SCRIPT, url],
+        cwd=PROJECT_DIR,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 def main():
     message = read_message()
     url = message.get("url", "")
 
     try:
-        python_bin = find_python()
-        subprocess.Popen(
-            [python_bin, APP_SCRIPT, url],
-            cwd=PROJECT_DIR,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        launch(url)
         send_message({"ok": True})
     except Exception as e:
         send_message({"ok": False, "error": str(e)})
