@@ -8,7 +8,10 @@ import threading
 import re
 import urllib.parse
 
-import webview
+try:
+    import webview
+except ImportError:
+    webview = None
 
 YTDLP_CANDIDATES = [
     shutil.which("yt-dlp"),
@@ -170,7 +173,10 @@ def build_args(binary, settings, dest):
         args += ["--cookies-from-browser", auth["cookiesFromBrowser"]]
 
     # --- sponsorblock ---
-    categories = sb.get("categories") or "all"
+    categories = sb.get("categories")
+    if isinstance(categories, (list, tuple)):
+        categories = ",".join(c for c in categories if c)
+    categories = categories or "all"
     if sb.get("mark"):
         args += ["--sponsorblock-mark", categories]
     if sb.get("remove"):
