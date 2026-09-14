@@ -9,6 +9,22 @@ A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), 
 
 **Platform:** macOS is primary and what's actually been tested; Linux support exists but is untested (written to spec) — see [`linux/README.md`](linux/README.md) for Linux-specific setup (an extra system dependency `pywebview` needs, and Linux's native-messaging paths). Every section below is written for macOS unless a Linux note is called out inline.
 
+## Quick setup
+
+Download the [latest release](../../releases/latest), extract it, and from inside that folder run:
+
+```bash
+./install.sh
+```
+
+or, on macOS, just double-click `install.command` in Finder — no Terminal needed.
+
+This installs everything scriptable in one pass: system dependencies (ffmpeg, yt-dlp, and on Linux the GTK backend `pywebview` needs), a project-local virtualenv with `pywebview` installed into it, and the native messaging host for whichever browsers it detects. Pass `--firefox` to also set up the Firefox extension (a few extra manual steps are unavoidable there — see [`firefox-extension/README.md`](firefox-extension/README.md)).
+
+One step genuinely can't be scripted — browsers don't allow installing an unpacked extension from the command line — so the script finishes by printing exactly what to click (`chrome://extensions` → Developer mode → Load unpacked → the `extension/` folder). Safe to re-run any time.
+
+The sections below are what `install.sh` is actually doing under the hood, useful if you want to understand or customize a step, or if you'd rather not run a setup script and do it by hand.
+
 ## Requirements
 
 - Python 3.9+, `pywebview` (`pip install -r requirements.txt`) — **Linux only:** don't run that command as-is; `pywebview` needs a system-level GTK or Qt backend pip can't provide, and most distros now block a plain `pip install` outside a virtualenv anyway (PEP 668). See [`linux/README.md`](linux/README.md#system-dependencies) for the actual steps.
