@@ -60,6 +60,19 @@ def settings_path():
     return os.path.join(config_dir, "settings.json")
 
 
+def sanitize_settings_payload(payload):
+    """Never let the password field reach disk in plaintext, whether that's
+    the regular auto-save location or an explicit export elsewhere."""
+    settings = payload.get("settings", {})
+    auth = settings.get("auth")
+    if isinstance(auth, dict):
+        auth = dict(auth)
+        auth["password"] = ""
+        settings = dict(settings, auth=auth)
+        payload = dict(payload, settings=settings)
+    return payload
+
+
 def build_args(binary, settings, dest):
     """Translate the settings dict from the UI into a yt-dlp argv list."""
     preset = settings.get("preset", "best")
@@ -222,11 +235,11 @@ class Api:
         self.window = window
 
     def choose_folder(self):
-        result = self.window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self.window.create_file_dialog(webview.FileDialog.FOLDER)
         return result[0] if result else None
 
-    def choose_file(self):
-        result = self.window.create_file_dialog(webview.OPEN_DIALOG)
+    def choose_file(self, file_types=()):
+        result = self.window.create_file_dialog(webview.FileDialog.OPEN, file_types=file_types)
         return result[0] if result else None
 
     def default_folder(self):
@@ -240,20 +253,47 @@ class Api:
             return None
 
     def save_settings(self, payload):
-        # Never persist the password field to disk in plaintext.
-        settings = payload.get("settings", {})
-        auth = settings.get("auth")
-        if isinstance(auth, dict):
-            auth = dict(auth)
-            auth["password"] = ""
-            settings = dict(settings, auth=auth)
-            payload = dict(payload, settings=settings)
+        payload = sanitize_settings_payload(payload)
         try:
             with open(settings_path(), "w") as f:
                 json.dump(payload, f, indent=2)
             return True
         except Exception:
             return False
+
+    def export_settings(self, payload):
+        result = self.window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            save_filename="ytdlp-gui-settings.json",
+            file_types=("JSON files (*.json)", "All files (*.*)"),
+        )
+        dest = result[0] if result else None
+        if not dest:
+            return {"ok": False, "cancelled": True}
+        try:
+            payload = sanitize_settings_payload(payload)
+            with open(dest, "w") as f:
+                json.dump(payload, f, indent=2)
+            return {"ok": True, "path": dest}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def import_settings(self):
+        result = self.window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            file_types=("JSON files (*.json)", "All files (*.*)"),
+        )
+        src = result[0] if result else None
+        if not src:
+            return {"ok": False, "cancelled": True}
+        try:
+            with open(src) as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or "settings" not in data:
+                return {"ok": False, "error": "Not a yt-dlp GUI settings file."}
+            return {"ok": True, "data": data}
+        except (OSError, json.JSONDecodeError) as e:
+            return {"ok": False, "error": str(e)}
 
     def check_binary(self):
         path = find_ytdlp()

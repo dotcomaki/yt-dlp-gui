@@ -77,6 +77,7 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 
 - URL input, quality presets (Best / 720p / 480p / Audio-only) or a raw custom format string
 - Advanced tab covering format/merge options, filenames, playlists, subtitles, thumbnails/metadata, audio extraction, network (proxy/rate-limit/retries), auth & cookies, SponsorBlock, geo-bypass, post-run commands, debug flags, and a raw extra-arguments passthrough
+- Settings persist across launches (`~/.config/ytdlp-gui/settings.json`, password field never saved to disk) — **Import…**/**Export…** in the Advanced tab move a whole configuration between machines or back one up, same password exclusion applied
 - Live progress bar, speed/ETA, and a separate streaming Log tab
 - Cancel an in-progress download
 
