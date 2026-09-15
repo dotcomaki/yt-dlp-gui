@@ -18,6 +18,13 @@ YTDLP_CANDIDATES = [
     os.path.expanduser("~/.local/bin/yt-dlp"),         # Linux `pip install --user`
 ]
 
+FFMPEG_CANDIDATES = [
+    shutil.which("ffmpeg"),
+    "/opt/homebrew/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+]
+
 PROGRESS_RE = re.compile(
     r"\[download\]\s+(?P<pct>[\d.]+)%.*?of\s+~?(?P<size>[\d.]+\S+)"
     r"(?:\s+at\s+(?P<speed>[\d.]+\S+/s))?(?:\s+ETA\s+(?P<eta>\S+))?"
@@ -31,21 +38,19 @@ QUALITY_FORMATS = {
 }
 
 
-def find_ytdlp():
-    for path in YTDLP_CANDIDATES:
+def _first_executable(candidates):
+    for path in candidates:
         if path and os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     return None
 
 
+def find_ytdlp():
+    return _first_executable(YTDLP_CANDIDATES)
+
+
 def find_ffmpeg():
-    return shutil.which("ffmpeg") or (
-        "/opt/homebrew/bin/ffmpeg" if os.path.isfile("/opt/homebrew/bin/ffmpeg") else None
-    ) or (
-        "/usr/local/bin/ffmpeg" if os.path.isfile("/usr/local/bin/ffmpeg") else None
-    ) or (
-        "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else None
-    )
+    return _first_executable(FFMPEG_CANDIDATES)
 
 
 def settings_path():
@@ -170,10 +175,16 @@ def build_args(binary, settings, dest):
         args += ["--cookies-from-browser", auth["cookiesFromBrowser"]]
 
     # --- sponsorblock ---
-    categories = sb.get("categories") or "all"
-    if sb.get("mark"):
+    # No fallback to "all" here — the settings default already is "all",
+    # so an empty value only happens when the user deliberately cleared
+    # every category, which should mean "don't mark/remove anything",
+    # not silently act on every category anyway.
+    categories = sb.get("categories") or ""
+    if isinstance(categories, (list, tuple)):
+        categories = ",".join(c for c in categories if c)
+    if sb.get("mark") and categories:
         args += ["--sponsorblock-mark", categories]
-    if sb.get("remove"):
+    if sb.get("remove") and categories:
         args += ["--sponsorblock-remove", categories]
 
     # --- geo-restriction ---

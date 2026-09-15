@@ -79,3 +79,16 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 - Advanced tab covering format/merge options, filenames, playlists, subtitles, thumbnails/metadata, audio extraction, network (proxy/rate-limit/retries), auth & cookies, SponsorBlock, geo-bypass, post-run commands, debug flags, and a raw extra-arguments passthrough
 - Live progress bar, speed/ETA, and a separate streaming Log tab
 - Cancel an in-progress download
+
+## Running the tests
+
+Covers `build_args()` (the settings-dict-to-yt-dlp-argv translator — the highest-value target, since every Advanced-tab option flows through it), the `find_ytdlp`/`find_ffmpeg` candidate-list detection, and the frontend's `deepMerge`/`getPath`/`setPath` settings helpers (`ui/utils.js`). Deliberately out of scope: anything needing a real browser extension load or an actual GUI window — those stay manual, same as the rest of this README.
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 -m pytest tests/ -v
+
+node --test tests/test_utils.js
+```
+
+Both run in CI (`.github/workflows/tests.yml`) on macOS and Linux for the Python suite, Linux for the JS one.

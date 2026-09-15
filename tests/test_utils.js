@@ -1,0 +1,71 @@
+// Tests for ui/utils.js (getPath/setPath/deepMerge) using Node's built-in
+// test runner — no extra dependency needed for a project this size.
+// Run with: node --test tests/test_utils.js
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { getPath, setPath, deepMerge } = require('../ui/utils.js');
+
+test('getPath reads a nested value', () => {
+  const obj = { audio: { extractAudio: true } };
+  assert.equal(getPath(obj, 'audio.extractAudio'), true);
+});
+
+test('getPath returns undefined for a missing path without throwing', () => {
+  const obj = { audio: {} };
+  assert.equal(getPath(obj, 'audio.nonexistent'), undefined);
+  assert.equal(getPath({}, 'nothing.here.at.all'), undefined);
+});
+
+test('setPath writes a nested value', () => {
+  const obj = { audio: { extractAudio: false } };
+  setPath(obj, 'audio.extractAudio', true);
+  assert.equal(obj.audio.extractAudio, true);
+});
+
+test('deepMerge copies matching-type values from source onto target', () => {
+  const target = { preset: 'best', audio: { audioFormat: 'mp3' } };
+  const source = { preset: '720p', audio: { audioFormat: 'flac' } };
+  deepMerge(target, source);
+  assert.equal(target.preset, '720p');
+  assert.equal(target.audio.audioFormat, 'flac');
+});
+
+test('deepMerge ignores keys missing from the saved source (keeps defaults)', () => {
+  const target = { preset: 'best', network: { proxy: '' } };
+  const source = { preset: '720p' }; // no "network" key at all
+  deepMerge(target, source);
+  assert.equal(target.preset, '720p');
+  assert.deepEqual(target.network, { proxy: '' });
+});
+
+test('deepMerge ignores extra keys the current defaults do not have', () => {
+  const target = { preset: 'best' };
+  const source = { preset: '720p', somethingRemovedInANewerVersion: 'x' };
+  deepMerge(target, source);
+  assert.deepEqual(target, { preset: '720p' });
+});
+
+test('deepMerge ignores a value whose type does not match the default', () => {
+  // e.g. a corrupted or hand-edited settings.json shouldn't be able to
+  // replace a boolean with a string, etc.
+  const target = { debug: { verbose: false } };
+  const source = { debug: { verbose: 'yes please' } };
+  deepMerge(target, source);
+  assert.equal(target.debug.verbose, false);
+});
+
+test('deepMerge recurses into nested objects rather than replacing them wholesale', () => {
+  const target = { network: { proxy: '', rateLimit: '', forceIpv4: false } };
+  const source = { network: { proxy: 'socks5://127.0.0.1:9050' } };
+  deepMerge(target, source);
+  assert.equal(target.network.proxy, 'socks5://127.0.0.1:9050');
+  assert.equal(target.network.rateLimit, ''); // untouched, not wiped out
+  assert.equal(target.network.forceIpv4, false);
+});
+
+test('deepMerge handles a null or non-object source gracefully', () => {
+  const target = { preset: 'best' };
+  assert.deepEqual(deepMerge(target, null), { preset: 'best' });
+  assert.deepEqual(deepMerge(target, undefined), { preset: 'best' });
+  assert.deepEqual(deepMerge(target, 'not an object'), { preset: 'best' });
+});
