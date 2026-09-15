@@ -90,9 +90,21 @@
     gap: 4px;
   }
   .status-line { display: flex; align-items: center; gap: 6px; }
+  .status-line-clickable { cursor: pointer; }
+  .status-line-clickable:hover { color: var(--text); }
   .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
   .status-dot.ok { background: var(--success); }
   .status-dot.err { background: var(--danger); }
+  .status-dot.warn { background: #ffd60a; }
+  /* button.small-btn is declared later with higher specificity than a bare
+     class, so qualify this the same way for the overrides to actually win. */
+  button.small-btn.update-btn {
+    margin-top: 4px;
+    width: 100%;
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  button.small-btn.update-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* Main */
   .main {
@@ -342,8 +354,9 @@
       <div class="nav-item" data-tab="log"><span class="dot-icon"></span>Log</div>
       <div class="sidebar-spacer"></div>
       <div class="status-block">
-        <div class="status-line"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
+        <div class="status-line status-line-clickable" id="ytdlpStatusLine" title="Click to check for updates"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
         <div class="status-line"><span class="status-dot" id="ffmpegDot"></span><span id="ffmpegText">Checking ffmpeg…</span></div>
+        <button class="small-btn update-btn" id="ytdlpUpdateBtn" hidden>Update</button>
       </div>
     </div>
 
@@ -879,11 +892,103 @@
     logBox.scrollTop = logBox.scrollHeight;
   }
 
+  let downloading = false;
   function setDownloading(state) {
+    downloading = state;
     downloadBtn.disabled = state;
     downloadBtn.textContent = state ? 'Downloading…' : 'Download';
     cancelBtn.classList.toggle('show', state);
+    // Don't let `yt-dlp -U` swap the binary out from under a running download.
+    ytdlpUpdateBtn.disabled = state || updating;
   }
+
+  // --- yt-dlp update check -------------------------------------------------
+  const ytdlpUpdateBtn = document.getElementById('ytdlpUpdateBtn');
+  const ytdlpDot = document.getElementById('ytdlpDot');
+  const ytdlpText = document.getElementById('ytdlpText');
+  let latestUpdate = null;
+  let updating = false;
+  let currentYtdlpVersion = null;
+
+  function showYtdlpVersion(version) {
+    if (version) currentYtdlpVersion = version;
+    ytdlpDot.className = 'status-dot ok';
+    ytdlpText.textContent = 'yt-dlp ' + (currentYtdlpVersion || '');
+  }
+
+  async function checkForUpdate(manual) {
+    if (manual) ytdlpText.textContent = 'Checking for updates…';
+    let result;
+    try {
+      // Pass the version we already know so the backend doesn't re-run
+      // `yt-dlp --version` (slow on the standalone binary).
+      result = await window.pywebview.api.check_for_update(currentYtdlpVersion);
+    } catch (err) {
+      result = { ok: false };
+    }
+    if (!result.ok) {
+      // Offline / rate-limited / yt-dlp missing: stay quiet unless the user
+      // explicitly asked, then say so briefly in the log.
+      if (manual) {
+        showYtdlpVersion(currentYtdlpVersion);
+        switchTab('log');
+        appendLog("Couldn't check for a yt-dlp update" + (result.error ? ` (${result.error})` : '.'), 'err-line');
+      }
+      return;
+    }
+    latestUpdate = result;
+    showYtdlpVersion(result.current);
+    if (result.updateAvailable) {
+      ytdlpDot.className = 'status-dot warn';
+      ytdlpUpdateBtn.hidden = false;
+      ytdlpUpdateBtn.textContent = `Update to ${result.latest}`;
+      ytdlpUpdateBtn.title = result.canAutoUpdate
+        ? `Runs: ${result.manualCommand}`
+        : `Can't update automatically — ${result.manualCommand}`;
+    } else {
+      ytdlpUpdateBtn.hidden = true;
+      if (manual) {
+        switchTab('log');
+        appendLog(`yt-dlp ${result.current} is up to date.`, 'ok-line');
+      }
+    }
+  }
+
+  document.getElementById('ytdlpStatusLine').addEventListener('click', () => {
+    if (!updating) checkForUpdate(true);
+  });
+
+  ytdlpUpdateBtn.addEventListener('click', async () => {
+    if (!latestUpdate || updating || downloading) return;
+    switchTab('log');
+    if (!latestUpdate.canAutoUpdate) {
+      appendLog(`yt-dlp ${latestUpdate.latest} is available, but this install can't be updated from here — ${latestUpdate.manualCommand}`, 'err-line');
+      return;
+    }
+    updating = true;
+    ytdlpUpdateBtn.disabled = true;
+    ytdlpUpdateBtn.textContent = 'Updating…';
+    await window.pywebview.api.update_ytdlp();
+  });
+
+  window.addEventListener('ytdlp-update-done', (e) => {
+    updating = false;
+    ytdlpUpdateBtn.disabled = downloading;
+    const { success, version, error } = e.detail;
+    if (success) {
+      if (version && version === currentYtdlpVersion) {
+        // exit 0 but same version: yt-dlp decided nothing needed doing
+        appendLog(`yt-dlp ${version} — nothing changed (already current on its update channel).`, 'ok-line');
+      } else {
+        appendLog(`yt-dlp updated${version ? ' to ' + version : ''}.`, 'ok-line');
+      }
+      showYtdlpVersion(version);
+      checkForUpdate(false); // re-evaluate; hides the button if now current
+    } else {
+      appendLog('yt-dlp update failed' + (error ? `: ${error}` : ' — check the output above.'), 'err-line');
+      if (latestUpdate) ytdlpUpdateBtn.textContent = `Update to ${latestUpdate.latest}`;
+    }
+  });
 
   downloadBtn.addEventListener('click', async () => {
     const url = document.getElementById('urlInput').value.trim();
@@ -957,15 +1062,14 @@
       folderInput.value = savedDestFolder || await window.pywebview.api.default_folder();
     } catch (err) {}
 
+    let ytdlpFound = false;
     try {
       const info = await window.pywebview.api.check_binary();
-      const ytdlpDot = document.getElementById('ytdlpDot');
-      const ytdlpText = document.getElementById('ytdlpText');
       if (info.found) {
-        ytdlpDot.classList.add('ok');
-        ytdlpText.textContent = 'yt-dlp ' + (info.version || '');
+        ytdlpFound = true;
+        showYtdlpVersion(info.version);
       } else {
-        ytdlpDot.classList.add('err');
+        ytdlpDot.className = 'status-dot err';
         ytdlpText.textContent = 'yt-dlp not found';
       }
       const ffmpegDot = document.getElementById('ffmpegDot');
@@ -978,8 +1082,12 @@
         ffmpegText.textContent = 'ffmpeg missing';
       }
     } catch (err) {
-      document.getElementById('ytdlpText').textContent = 'Backend not ready';
+      ytdlpText.textContent = 'Backend not ready';
     }
+
+    // Network call — runs after everything local is already on screen, and
+    // stays silent if it can't reach GitHub.
+    if (ytdlpFound) checkForUpdate(false);
   }
 
   window.addEventListener('pywebviewready', init);

@@ -27,7 +27,7 @@ The sections below are what `install.sh` is actually doing under the hood, usefu
 
 ## Requirements
 
-- Python 3.9+, `pywebview` (`pip install -r requirements.txt`) — **Linux only:** don't run that command as-is; `pywebview` needs a system-level GTK or Qt backend pip can't provide, and most distros now block a plain `pip install` outside a virtualenv anyway (PEP 668). See [`linux/README.md`](linux/README.md#system-dependencies) for the actual steps.
+- Python 3.9+, `pywebview` + `certifi` (`pip install -r requirements.txt`; `certifi` is what lets the update check reach GitHub over HTTPS from python.org's macOS Python, whose bundled OpenSSL ships with an empty trust store) — **Linux only:** don't run that command as-is; `pywebview` needs a system-level GTK or Qt backend pip can't provide, and most distros now block a plain `pip install` outside a virtualenv anyway (PEP 668). See [`linux/README.md`](linux/README.md#system-dependencies) for the actual steps.
 - `ffmpeg` — required to merge separate video+audio streams; without it, downloads above 720p will have no audio. macOS: `brew install ffmpeg`. Linux: `sudo apt install ffmpeg` (or your distro's equivalent)
 - `yt-dlp` on your `PATH` (or, macOS only, at `/usr/local/bin/yt-dlp` or `~/Downloads/yt-dlp_macos`)
 
@@ -78,6 +78,7 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 - URL input, quality presets (Best / 720p / 480p / Audio-only) or a raw custom format string
 - Advanced tab covering format/merge options, filenames, playlists, subtitles, thumbnails/metadata, audio extraction, network (proxy/rate-limit/retries), auth & cookies, SponsorBlock, geo-bypass, post-run commands, debug flags, and a raw extra-arguments passthrough
 - Settings persist across launches (`~/.config/ytdlp-gui/settings.json`, password field never saved to disk) — **Import…**/**Export…** in the Advanced tab move a whole configuration between machines or back one up, same password exclusion applied
+- yt-dlp update check on launch (quietly skipped if offline) — the sidebar status turns yellow with an **Update to …** button when a newer release exists. Standalone-binary installs update in-app via `yt-dlp -U`, Homebrew via `brew upgrade yt-dlp`, pip installs via the script's own interpreter's `pip`; distro-package installs get the right package-manager command printed instead. Click the yt-dlp status line to re-check any time. yt-dlp's extractors break often as sites change, and "update yt-dlp" is almost always the fix, so this is worth keeping green.
 - Live progress bar, speed/ETA, and a separate streaming Log tab
 - Cancel an in-progress download
 

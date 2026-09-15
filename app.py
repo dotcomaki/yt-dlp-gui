@@ -2,11 +2,13 @@ import json
 import os
 import shlex
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
 import re
 import urllib.parse
+import urllib.request
 
 import webview
 
@@ -58,6 +60,112 @@ def settings_path():
     config_dir = os.path.join(config_home, "ytdlp-gui")
     os.makedirs(config_dir, exist_ok=True)
     return os.path.join(config_dir, "settings.json")
+
+
+YTDLP_RELEASES_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+
+
+def ytdlp_version(path):
+    out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=10)
+    return out.stdout.strip()
+
+
+def parse_version(text):
+    """yt-dlp versions are dates: '2026.08.19', or '2026.08.19.123456' on
+    the nightly channel. Anything else (git hashes, garbage) -> None."""
+    parts = []
+    for piece in (text or "").strip().split("."):
+        if not piece.isdigit():
+            return None
+        parts.append(int(piece))
+    return tuple(parts) or None
+
+
+def is_newer(latest, current):
+    a, b = parse_version(latest), parse_version(current)
+    if a is None or b is None:
+        return False
+    return a > b
+
+
+def _ssl_context():
+    # python.org's macOS Python ships its own OpenSSL with an empty trust
+    # store (unless the user ran its "Install Certificates.command"), so
+    # plain urlopen fails every HTTPS request with CERTIFICATE_VERIFY_FAILED.
+    # certifi's bundle is exactly what that command installs — use it
+    # directly when available; Linux/Homebrew pythons work either way.
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+def fetch_latest_version(timeout=5):
+    req = urllib.request.Request(
+        YTDLP_RELEASES_API,
+        headers={"User-Agent": "yt-dlp-gui", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
+        return json.load(resp).get("tag_name")
+
+
+def detect_install_method(path):
+    """How this yt-dlp got installed decides how it can be updated:
+    `yt-dlp -U` only self-updates the standalone binary; pip/Homebrew
+    installs refuse it and need their own package manager instead.
+
+    Returns (method, interpreter): method is one of 'homebrew', 'package',
+    'pip', 'standalone'; interpreter is the shebang python for 'pip'."""
+    real = os.path.realpath(path)
+    # Check both spellings: the path as given and where it resolves to.
+    # Symlinks can point out of a recognizable location, and macOS
+    # firmlinks rewrite prefixes (/home/... -> /System/Volumes/Data/home/...).
+    spellings = (path, real)
+    if any("/Cellar/" in p or "/.linuxbrew/" in p or p.startswith("/opt/homebrew/") for p in spellings):
+        return "homebrew", None
+    # Distro packages land in /usr/bin as a python script too, but their
+    # system python blocks `pip install` (PEP 668) — treat as package-managed.
+    if any(p.startswith(("/usr/bin/", "/usr/lib/", "/usr/lib64/")) for p in spellings):
+        return "package", None
+    try:
+        with open(real, "rb") as f:
+            head = f.readline(256)
+    except OSError:
+        return "standalone", None
+    if not head.startswith(b"#!"):
+        return "standalone", None
+    tokens = head[2:].decode("utf-8", "replace").split()
+    interpreter = None
+    if tokens:
+        interpreter = tokens[0]
+        if interpreter.endswith("/env") and len(tokens) > 1:
+            interpreter = shutil.which(tokens[1])
+    return "pip", interpreter
+
+
+def update_command(method, path, interpreter=None):
+    """argv that updates this install, or None if it has to be done by hand."""
+    if method == "standalone":
+        return [path, "-U"]
+    if method == "homebrew":
+        brew = shutil.which("brew") or _first_executable([
+            "/opt/homebrew/bin/brew",
+            "/usr/local/bin/brew",
+            "/home/linuxbrew/.linuxbrew/bin/brew",
+        ])
+        return [brew, "upgrade", "yt-dlp"] if brew else None
+    if method == "pip" and interpreter:
+        return [interpreter, "-m", "pip", "install", "--upgrade", "yt-dlp"]
+    return None
+
+
+MANUAL_UPDATE_HINTS = {
+    "standalone": "yt-dlp -U",
+    "homebrew": "brew upgrade yt-dlp",
+    "pip": "pip install --upgrade yt-dlp",
+    "package": "use your distro's package manager, e.g. sudo apt install --only-upgrade yt-dlp",
+}
 
 
 def sanitize_settings_payload(payload):
@@ -303,11 +411,79 @@ class Api:
             info["found"] = False
             return info
         try:
-            out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=10)
-            info.update({"found": True, "path": path, "version": out.stdout.strip()})
+            info.update({"found": True, "path": path, "version": ytdlp_version(path)})
         except Exception as e:
             info.update({"found": False, "error": str(e)})
         return info
+
+    def check_for_update(self, current=None):
+        # `current` is the version check_binary() already reported — pass it
+        # back in rather than re-running `yt-dlp --version`, which costs
+        # several seconds on the standalone PyInstaller binary (it unpacks
+        # itself on every launch).
+        path = find_ytdlp()
+        if not path:
+            return {"ok": False, "reason": "not-found"}
+        try:
+            current = current or ytdlp_version(path)
+            latest = fetch_latest_version()
+        except Exception as e:
+            # Offline, rate-limited, GitHub down — none of these should
+            # surface as an error in the UI, just skip the check.
+            return {"ok": False, "reason": "unavailable", "error": str(e)}
+        if not latest:
+            return {"ok": False, "reason": "unavailable"}
+        method, interpreter = detect_install_method(path)
+        return {
+            "ok": True,
+            "current": current,
+            "latest": latest,
+            "updateAvailable": is_newer(latest, current),
+            "method": method,
+            "canAutoUpdate": update_command(method, path, interpreter) is not None,
+            "manualCommand": MANUAL_UPDATE_HINTS[method],
+        }
+
+    def update_ytdlp(self):
+        threading.Thread(target=self._run_update, daemon=True).start()
+        return True
+
+    def _run_update(self):
+        path = find_ytdlp()
+        method, interpreter = detect_install_method(path) if path else ("standalone", None)
+        cmd = update_command(method, path, interpreter) if path else None
+        if not cmd:
+            self._emit("ytdlp-update-done", {
+                "success": False,
+                "error": f"Can't update automatically — {MANUAL_UPDATE_HINTS[method]}",
+            })
+            return
+
+        self._emit("ytdlp-log", {"line": f"$ {' '.join(shlex.quote(a) for a in cmd)}"})
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            )
+        except Exception as e:
+            self._emit("ytdlp-update-done", {"success": False, "error": str(e)})
+            return
+
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if line:
+                self._emit("ytdlp-log", {"line": line})
+        code = proc.wait()
+
+        version = None
+        try:
+            version = ytdlp_version(find_ytdlp() or path)
+        except Exception:
+            pass
+        self._emit("ytdlp-update-done", {
+            "success": code == 0,
+            "code": code,
+            "version": version,
+        })
 
     def start_download(self, url, settings, dest):
         threading.Thread(target=self._run_download, args=(url, settings, dest), daemon=True).start()
