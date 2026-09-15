@@ -618,9 +618,46 @@
                 <input type="checkbox" id="cb-sbRemove" data-bind="sponsorblock.remove" />
                 <label for="cb-sbRemove">Remove sponsor segments from file</label>
               </div>
-              <div class="field">
+              <div class="field" style="margin-top: 10px;">
                 <label>Categories</label>
-                <input type="text" data-bind="sponsorblock.categories" placeholder="all" />
+                <div class="checkbox-row" style="margin-bottom: 6px;">
+                  <input type="checkbox" id="cb-sbCat-all" />
+                  <label for="cb-sbCat-all" style="font-weight: 600;">All categories</label>
+                </div>
+                <div class="sb-categories-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-top: 4px; padding-left: 4px;">
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-sponsor" value="sponsor" />
+                    <label for="cb-sbCat-sponsor">Sponsor</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-intro" value="intro" />
+                    <label for="cb-sbCat-intro">Intermission / Intro</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-outro" value="outro" />
+                    <label for="cb-sbCat-outro">Endcards / Outro</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-selfpromo" value="selfpromo" />
+                    <label for="cb-sbCat-selfpromo">Unpaid / Self-promotion</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-preview" value="preview" />
+                    <label for="cb-sbCat-preview">Preview / Recap</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-filler" value="filler" />
+                    <label for="cb-sbCat-filler">Filler tangent</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-interaction" value="interaction" />
+                    <label for="cb-sbCat-interaction">Interaction reminder</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="cb-sb-cat" id="cb-sbCat-music_offtopic" value="music_offtopic" />
+                    <label for="cb-sbCat-music_offtopic">Non-music section</label>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -767,6 +804,70 @@
     }
   }
 
+  function initSponsorBlockCategories() {
+    const allCatCheckbox = document.getElementById('cb-sbCat-all');
+    const catCheckboxes = document.querySelectorAll('.cb-sb-cat');
+    if (!allCatCheckbox || !catCheckboxes.length) return;
+
+    function syncUIFromSettings() {
+      const raw = (settings.sponsorblock.categories || 'all').trim();
+      if (raw === 'all') {
+        allCatCheckbox.checked = true;
+        allCatCheckbox.indeterminate = false;
+        catCheckboxes.forEach(cb => { cb.checked = true; });
+      } else if (!raw) {
+        allCatCheckbox.checked = false;
+        allCatCheckbox.indeterminate = false;
+        catCheckboxes.forEach(cb => { cb.checked = false; });
+      } else {
+        const selected = new Set(raw.split(',').map(s => s.trim().toLowerCase()));
+        let checkedCount = 0;
+        catCheckboxes.forEach(cb => {
+          const isChecked = selected.has(cb.value.toLowerCase());
+          cb.checked = isChecked;
+          if (isChecked) checkedCount++;
+        });
+        allCatCheckbox.checked = (checkedCount === catCheckboxes.length);
+        allCatCheckbox.indeterminate = (checkedCount > 0 && checkedCount < catCheckboxes.length);
+      }
+    }
+
+    function syncSettingsFromUI() {
+      const checkedCats = Array.from(catCheckboxes)
+        .filter(cb => cb.checked)
+        .map(cb => cb.value);
+
+      if (checkedCats.length === catCheckboxes.length) {
+        allCatCheckbox.checked = true;
+        allCatCheckbox.indeterminate = false;
+        settings.sponsorblock.categories = 'all';
+      } else if (checkedCats.length === 0) {
+        allCatCheckbox.checked = false;
+        allCatCheckbox.indeterminate = false;
+        settings.sponsorblock.categories = '';
+      } else {
+        allCatCheckbox.checked = false;
+        allCatCheckbox.indeterminate = true;
+        settings.sponsorblock.categories = checkedCats.join(',');
+      }
+      saveSettings();
+    }
+
+    allCatCheckbox.addEventListener('change', () => {
+      const isChecked = allCatCheckbox.checked;
+      allCatCheckbox.indeterminate = false;
+      catCheckboxes.forEach(cb => { cb.checked = isChecked; });
+      settings.sponsorblock.categories = isChecked ? 'all' : '';
+      saveSettings();
+    });
+
+    catCheckboxes.forEach(cb => {
+      cb.addEventListener('change', syncSettingsFromUI);
+    });
+
+    syncUIFromSettings();
+  }
+
   // Tab navigation (scoped to the top-level sidebar only — the Advanced
   // sub-nav below also uses .nav-item for styling but is handled separately)
   document.querySelectorAll('.sidebar > .nav-item').forEach(item => {
@@ -911,6 +1012,7 @@
     } catch (err) {}
 
     bindInputs();
+    initSponsorBlockCategories();
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
 
