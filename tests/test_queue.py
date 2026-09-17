@@ -389,7 +389,11 @@ def test_max_concurrent_bounds_in_flight_jobs():
     assert idle(q)
     elapsed = time.time() - t
     assert runner.peak == 2
-    assert runner.started == [1, 2, 3, 4]           # still starts in queue order
+    # Slots are *assigned* in queue order under the lock, but the threads
+    # that then start them race, so the observed start order isn't fixed
+    # (CI saw [1, 2, 4, 3]). Strict ordering is covered by the sequential
+    # test; here only "everything ran" is a valid claim.
+    assert sorted(runner.started) == [1, 2, 3, 4]
     assert elapsed < 4 * runner.hold                  # actually overlapped, not serialized
     assert [j["status"] for j in q.snapshot()] == ["done"] * 4
 
