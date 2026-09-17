@@ -250,6 +250,76 @@
     line-height: 1.5;
   }
 
+  /* Pre-download preview */
+  .preview { margin: -6px 0 14px; }
+  .preview-status {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    padding: 6px 0;
+  }
+  .preview-status.is-error { color: var(--danger); }
+  .preview-card {
+    display: flex;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+  }
+  .preview-thumb {
+    width: 112px;
+    height: 63px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: var(--bg-field);
+    flex-shrink: 0;
+  }
+  .preview-thumb[hidden] { display: none; }
+  .preview-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .preview-title {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .preview-meta { font-size: 11.5px; color: var(--text-dim); }
+  .preview-actions { margin-top: auto; display: flex; gap: 6px; }
+  .preview-formats {
+    margin-top: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    max-height: 220px;
+    overflow: auto;
+  }
+  .preview-formats table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+  }
+  .preview-formats th, .preview-formats td {
+    text-align: left;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .preview-formats th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-panel);
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .preview-formats tbody tr { cursor: pointer; }
+  .preview-formats tbody tr:hover { background: var(--bg-field); }
+  .preview-formats tbody tr.is-selected { background: rgba(10, 132, 255, 0.18); }
+  .preview-formats tbody tr.is-selected td:last-child::after { content: "\2713"; color: var(--accent); }
+  .preview-formats .hint { padding: 6px 8px; }
+
   /* Download queue */
   .queue-section { margin-top: 18px; }
   .queue-header {
@@ -438,6 +508,27 @@
         <div class="field">
           <label>URLs <span class="hint-inline">(one per line)</span></label>
           <textarea id="urlInput" class="url-input" rows="3" placeholder="https://youtube.com/watch?v=..." autofocus></textarea>
+        </div>
+
+        <div class="preview" id="preview" hidden>
+          <div class="preview-status" id="previewStatus" hidden></div>
+          <div class="preview-card" id="previewCard" hidden>
+            <img class="preview-thumb" id="previewThumb" alt="" />
+            <div class="preview-body">
+              <div class="preview-title" id="previewTitle"></div>
+              <div class="preview-meta" id="previewMeta"></div>
+              <div class="preview-actions">
+                <button class="small-btn" id="previewFormatsBtn" hidden>Formats</button>
+              </div>
+            </div>
+          </div>
+          <div class="preview-formats" id="previewFormats" hidden>
+            <table>
+              <thead><tr><th>ID</th><th>Type</th><th>Resolution</th><th>FPS</th><th>Video</th><th>Audio</th><th>Size</th><th>kbps</th><th></th></tr></thead>
+              <tbody id="previewFormatsBody"></tbody>
+            </table>
+            <div class="hint">Click a row to use it as the custom format. Video-only streams get <code>+bestaudio</code> merged in automatically.</div>
+          </div>
         </div>
 
         <div class="field">
@@ -1248,6 +1339,128 @@
     }
   });
 
+  // --- Pre-download preview ------------------------------------------------
+  const preview = document.getElementById('preview');
+  const previewStatus = document.getElementById('previewStatus');
+  const previewCard = document.getElementById('previewCard');
+  const previewThumb = document.getElementById('previewThumb');
+  const previewTitle = document.getElementById('previewTitle');
+  const previewMeta = document.getElementById('previewMeta');
+  const previewFormatsBtn = document.getElementById('previewFormatsBtn');
+  const previewFormats = document.getElementById('previewFormats');
+  const previewFormatsBody = document.getElementById('previewFormatsBody');
+  let previewTimer = null;
+  let previewSeq = 0;          // drops responses for URLs the user has already moved on from
+  let previewUrl = null;       // what the current card describes
+  let previewFormatRows = [];
+
+  function looksLikeUrl(s) {
+    return /^(https?:\/\/|www\.)/i.test(s);
+  }
+
+  function formatDuration(secs) {
+    if (secs == null) return '';
+    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+    return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + ':' + String(s).padStart(2, '0');
+  }
+
+  function hidePreview() {
+    previewUrl = null;
+    preview.hidden = true;
+    previewCard.hidden = true;
+    previewStatus.hidden = true;
+    previewFormats.hidden = true;
+  }
+
+  function showPreviewStatus(text, isError) {
+    preview.hidden = false;
+    previewCard.hidden = true;
+    previewFormats.hidden = true;
+    previewStatus.hidden = false;
+    previewStatus.textContent = text;
+    previewStatus.classList.toggle('is-error', !!isError);
+  }
+
+  function renderPreview(info) {
+    preview.hidden = false;
+    previewStatus.hidden = true;
+    previewCard.hidden = false;
+    previewFormats.hidden = true;
+    previewTitle.textContent = info.title || info.url;
+    previewTitle.title = info.title || info.url;
+    if (info.thumbnail) {
+      previewThumb.hidden = false;
+      previewThumb.src = info.thumbnail;
+      previewThumb.onerror = () => { previewThumb.hidden = true; };
+    } else {
+      previewThumb.hidden = true;
+    }
+    const bits = [];
+    if (info.kind === 'playlist') bits.push(`Playlist · ${info.count} video${info.count === 1 ? '' : 's'}`);
+    if (info.uploader) bits.push(info.uploader);
+    if (info.duration != null) bits.push(formatDuration(info.duration));
+    previewMeta.textContent = bits.join(' · ');
+    previewFormatRows = info.formats || [];
+    previewFormatsBtn.hidden = previewFormatRows.length === 0;
+    previewFormatsBtn.textContent = `Formats (${previewFormatRows.length})`;
+    renderFormatRows();
+  }
+
+  function formatSelector(f) {
+    return f.kind === 'video' ? `${f.id}+bestaudio/best` : String(f.id);
+  }
+
+  function renderFormatRows() {
+    previewFormatsBody.innerHTML = '';
+    const current = settings.preset === 'custom' ? settings.format.customFormat : null;
+    previewFormatRows.forEach(f => {
+      const tr = document.createElement('tr');
+      const sel = formatSelector(f);
+      if (current && current === sel) tr.classList.add('is-selected');
+      [f.id, f.kind, f.resolution, f.fps ? String(Math.round(f.fps)) : '', f.vcodec, f.acodec, f.size, f.tbr != null ? String(f.tbr) : '', '']
+        .forEach(text => { const td = document.createElement('td'); td.textContent = text; tr.appendChild(td); });
+      tr.title = f.note ? `${f.note} — click to use ${sel}` : `Click to use ${sel}`;
+      tr.addEventListener('click', () => {
+        selectPreset('custom');
+        settings.format.customFormat = sel;
+        customFormatInput.value = sel;
+        saveSettings();
+        renderFormatRows();
+      });
+      previewFormatsBody.appendChild(tr);
+    });
+  }
+
+  previewFormatsBtn.addEventListener('click', () => {
+    previewFormats.hidden = !previewFormats.hidden;
+  });
+
+  async function fetchPreview(url) {
+    const seq = ++previewSeq;
+    previewUrl = url;   // the card is about this URL from now on, even while pending —
+                        // otherwise typing the previous URL back would be treated as "already shown"
+    showPreviewStatus('Fetching info…');
+    let info;
+    try {
+      info = await window.pywebview.api.fetch_info(url, settings, folderInput.value);
+    } catch (err) {
+      info = { ok: false, error: String(err) };
+    }
+    if (seq !== previewSeq) return;          // user moved on; a newer fetch owns the card
+    if (info.ok) renderPreview(info);
+    else showPreviewStatus(`Couldn't fetch info: ${info.error}`, true);
+  }
+
+  function schedulePreview() {
+    clearTimeout(previewTimer);
+    const first = parseUrls(urlInput.value)[0];
+    if (!first || !looksLikeUrl(first)) { previewSeq++; hidePreview(); return; }
+    if (first === previewUrl) return;         // already showing this one
+    previewTimer = setTimeout(() => fetchPreview(first), 700);
+  }
+
+  urlInput.addEventListener('input', schedulePreview);
+
   downloadBtn.addEventListener('click', async () => {
     const urls = parseUrls(urlInput.value);
     if (!urls.length) { appendLog('Please enter at least one URL.', 'err-line'); return; }
@@ -1255,6 +1468,7 @@
     // run keeps the current job's output.
     if (!downloading) { logStarted = false; logBox.innerHTML = ''; }
     urlInput.value = '';
+    clearTimeout(previewTimer); previewSeq++; hidePreview();
     await window.pywebview.api.enqueue(urls, settings, folderInput.value);
   });
 
@@ -1323,6 +1537,7 @@
     const prefillUrl = new URLSearchParams(window.location.search).get('url');
     if (prefillUrl) {
       document.getElementById('urlInput').value = prefillUrl;
+      schedulePreview();
     }
 
     try {

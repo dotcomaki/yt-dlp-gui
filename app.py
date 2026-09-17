@@ -572,6 +572,88 @@ class DownloadQueue:
         self._dispatch()
 
 
+def info_args(binary, settings, dest, url):
+    """argv for a metadata-only fetch. Reuses build_args so cookies, proxy,
+    geo-bypass, playlist ranges etc. apply exactly as they would to the real
+    download; -J implies simulate, so the output/postprocessing flags are
+    inert. --flat-playlist keeps a playlist URL to one request."""
+    return build_args(binary, settings, dest) + ["-J", "--flat-playlist", "--no-warnings", url]
+
+
+def human_size(n):
+    if not n:
+        return ""
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024 or unit == "GiB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def _codec_family(codec):
+    if not codec or codec == "none":
+        return ""
+    return codec.split(".")[0]
+
+
+def summarize_formats(formats):
+    """The parts of yt-dlp's format list worth showing, best first. Storyboard
+    and other non-media entries are dropped."""
+    out = []
+    for f in formats or []:
+        vcodec, acodec = f.get("vcodec") or "none", f.get("acodec") or "none"
+        if f.get("ext") == "mhtml" or "storyboard" in (f.get("format_note") or "").lower():
+            continue
+        if vcodec == "none" and acodec == "none":
+            continue
+        has_video, has_audio = vcodec != "none", acodec != "none"
+        out.append({
+            "id": f.get("format_id"),
+            "ext": f.get("ext") or "",
+            "resolution": (f.get("resolution") or "") if has_video else "audio only",
+            "height": f.get("height") or 0,
+            "fps": f.get("fps"),
+            "vcodec": _codec_family(vcodec),
+            "acodec": _codec_family(acodec),
+            "size": human_size(f.get("filesize") or f.get("filesize_approx")),
+            "tbr": round(f["tbr"]) if f.get("tbr") else None,
+            "note": f.get("format_note") or "",
+            "kind": "video+audio" if has_video and has_audio else ("video" if has_video else "audio"),
+        })
+    # video first (tallest, then highest bitrate), audio-only after
+    out.sort(key=lambda x: (x["kind"] == "audio", -x["height"], -(x["tbr"] or 0)))
+    return out
+
+
+def format_selector(fmt):
+    """What to put in the custom -f field when a row is clicked: a video-only
+    stream needs audio merged in, anything with audio can stand alone."""
+    return f"{fmt['id']}+bestaudio/best" if fmt["kind"] == "video" else str(fmt["id"])
+
+
+def summarize_info(data):
+    """Trim yt-dlp -J output to what the preview card needs."""
+    if data.get("_type") == "playlist":
+        entries = data.get("entries") or []
+        return {
+            "kind": "playlist",
+            "title": data.get("title") or "",
+            "uploader": data.get("uploader") or data.get("channel") or "",
+            "count": data.get("playlist_count") or len(entries),
+            "thumbnail": data.get("thumbnail") or next((e.get("thumbnail") for e in entries if e.get("thumbnail")), None),
+            "url": data.get("webpage_url") or data.get("original_url") or "",
+            "formats": [],
+        }
+    return {
+        "kind": "video",
+        "title": data.get("title") or "",
+        "uploader": data.get("uploader") or data.get("channel") or "",
+        "duration": int(data["duration"]) if data.get("duration") else None,
+        "thumbnail": data.get("thumbnail"),
+        "url": data.get("webpage_url") or data.get("original_url") or "",
+        "formats": summarize_formats(data.get("formats")),
+    }
+
+
 def notify_command(title, message):
     """argv for a native desktop notification on this OS, or None if there's
     no way to show one (Linux without notify-send, anything else)."""
@@ -817,6 +899,32 @@ class Api:
             "code": code,
             "version": version,
         })
+
+    def fetch_info(self, url, settings, dest):
+        """Metadata for the preview card. Runs yt-dlp -J synchronously — the
+        JS side awaits it off the UI thread and drops stale responses."""
+        binary = find_ytdlp()
+        if not binary:
+            return {"ok": False, "error": "yt-dlp not found"}
+        try:
+            proc = subprocess.run(
+                info_args(binary, settings, dest, url),
+                capture_output=True, text=True, timeout=90,
+            )
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "timed out"}
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+        if proc.returncode != 0 or not proc.stdout.strip():
+            err = (proc.stderr or "").strip().splitlines()
+            return {"ok": False, "error": err[-1] if err else f"yt-dlp exited with code {proc.returncode}"}
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return {"ok": False, "error": "couldn't parse yt-dlp's output"}
+        info = summarize_info(data)
+        info["ok"] = True
+        return info
 
     def enqueue(self, urls, settings, dest):
         self.queue.set_max_concurrent(parallel_from_settings(settings))
