@@ -202,6 +202,11 @@ def parallel_from_settings(settings):
         return 1
 
 
+def notifications_enabled(settings):
+    # Default on — settings files from before this option exist have no key.
+    return bool((settings.get("notifications") or {}).get("enabled", True))
+
+
 def sanitize_settings_payload(payload):
     """Never let the password field reach disk in plaintext, whether that's
     the regular auto-save location or an explicit export elsewhere."""
@@ -436,6 +441,7 @@ class DownloadQueue:
                     "code": None,
                     "proc": None,
                     "cancel": False,
+                    "reported": False,
                 }
                 self._next_id += 1
                 self._jobs.append(job)
@@ -493,6 +499,16 @@ class DownloadQueue:
     def is_active(self):
         with self._lock:
             return any(j["status"] in ("queued", "running") for j in self._jobs)
+
+    def unreported_finished(self):
+        """Terminal jobs nobody has reported on yet (marks them reported).
+        Lets the notifier summarize a whole batch once when the queue drains
+        instead of once per job."""
+        with self._lock:
+            out = [j for j in self._jobs if j["status"] in TERMINAL_STATUSES and not j["reported"]]
+            for j in out:
+                j["reported"] = True
+            return out
 
     # --- internals ----------------------------------------------------------
 
@@ -556,6 +572,51 @@ class DownloadQueue:
         self._dispatch()
 
 
+def notify_command(title, message):
+    """argv for a native desktop notification on this OS, or None if there's
+    no way to show one (Linux without notify-send, anything else)."""
+    if sys.platform == "darwin":
+        # osascript strings: backslash and double-quote are the only escapes
+        # that matter inside a double-quoted AppleScript literal.
+        esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')
+        return ["osascript", "-e", f'display notification "{esc(message)}" with title "{esc(title)}"']
+    if sys.platform.startswith("linux"):
+        tool = shutil.which("notify-send")
+        return [tool, title, message] if tool else None
+    return None
+
+
+def send_notification(title, message):
+    cmd = notify_command(title, message)
+    if not cmd:
+        return False
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except OSError:
+        return False
+
+
+def summarize_finished(jobs):
+    """One line for the queue-drained notification. `jobs` are the terminal
+    jobs not yet reported. Cancelled ones are the user's own doing and
+    aren't counted; None if there's nothing worth saying."""
+    done = [j for j in jobs if j["status"] == "done"]
+    failed = [j for j in jobs if j["status"] == "failed"]
+    if not done and not failed:
+        return None
+    if len(done) == 1 and not failed:
+        return f"Downloaded: {done[0].get('title') or done[0]['url']}"
+    if len(failed) == 1 and not done:
+        return f"Download failed: {failed[0].get('title') or failed[0]['url']}"
+    parts = []
+    if done:
+        parts.append(f"{len(done)} download{'s' if len(done) != 1 else ''} finished")
+    if failed:
+        parts.append(f"{len(failed)} failed")
+    return ", ".join(parts)
+
+
 def run_download_job(job, emit):
     """Runs one queued job with yt-dlp, streaming log/progress events.
     Returns the process exit code (-1 if it couldn't start)."""
@@ -609,6 +670,7 @@ class Api:
     def __init__(self):
         self.window = None
         self.queue = DownloadQueue(self._emit, run_download_job)
+        self.notifier = send_notification
 
     def set_window(self, window):
         self.window = window
@@ -783,6 +845,28 @@ class Api:
         if self.window:
             js = f"window.dispatchEvent(new CustomEvent('{event}', {{detail: {json.dumps(payload)}}}))"
             self.window.evaluate_js(js)
+        if event == "ytdlp-done":
+            self._notify_if_drained()
+
+    def _notify_if_drained(self):
+        # ytdlp-done fires with the finished job already terminal and any
+        # remaining work still queued/running, so "not active" here means
+        # this was the last one — one notification for the whole batch.
+        if self.queue.is_active():
+            return
+        finished = self.queue.unreported_finished()
+        if not any(notifications_enabled(j["settings"]) for j in finished):
+            return
+        message = summarize_finished(finished)
+        if not message:
+            return
+        try:
+            self.notifier("yt-dlp", message)
+        except Exception:
+            # A missing/broken notification daemon must never take the
+            # queue down with it — this runs on the worker thread, before
+            # the queue dispatches the next job.
+            pass
 
 
 def main():

@@ -505,6 +505,7 @@
             <div class="nav-item" data-adv="geo"><span class="dot-icon"></span>Geo-restriction</div>
             <div class="nav-item" data-adv="postrun"><span class="dot-icon"></span>Post-run Command</div>
             <div class="nav-item" data-adv="debug"><span class="dot-icon"></span>Debug &amp; Logging</div>
+            <div class="nav-item" data-adv="notifications"><span class="dot-icon"></span>Notifications</div>
             <div class="nav-item" data-adv="extra"><span class="dot-icon"></span>Extra Arguments</div>
           </div>
 
@@ -831,6 +832,15 @@
               </div>
             </div>
 
+            <div class="adv-category" id="adv-notifications">
+              <h3>Notifications</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-notify" data-bind="notifications.enabled" />
+                <label for="cb-notify">Desktop notification when the queue finishes</label>
+              </div>
+              <div class="hint">One notification per batch, not per video — with the count of finished/failed downloads, or the title when it's just one. Cancelled downloads don't count. macOS shows it via Notification Center; Linux needs <code>notify-send</code>.</div>
+            </div>
+
             <div class="adv-category" id="adv-extra">
               <h3>Extra Arguments</h3>
               <div class="field">
@@ -867,6 +877,7 @@
     geo: { bypass: false, bypassCountry: '' },
     postrun: { exec: '' },
     debug: { verbose: false, simulate: false, ignoreErrors: false },
+    notifications: { enabled: true },
     extraArgs: '',
   };
 

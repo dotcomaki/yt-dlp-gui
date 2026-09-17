@@ -81,6 +81,7 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 - Settings persist across launches (`~/.config/ytdlp-gui/settings.json`, password field never saved to disk) — **Import…**/**Export…** in the Advanced tab move a whole configuration between machines or back one up, same password exclusion applied
 - yt-dlp update check on launch (quietly skipped if offline) — the sidebar status turns yellow with an **Update to …** button when a newer release exists. Standalone-binary installs update in-app via `yt-dlp -U`, Homebrew via `brew upgrade yt-dlp`, pip installs via the script's own interpreter's `pip`; distro-package installs get the right package-manager command printed instead. Click the yt-dlp status line to re-check any time. yt-dlp's extractors break often as sites change, and "update yt-dlp" is almost always the fix, so this is worth keeping green.
 - Live per-item progress, speed/ETA, and a separate streaming Log tab
+- Desktop notification when the queue finishes (Advanced → Notifications, on by default) — one per batch with finished/failed counts, or the title when it's a single download. macOS via Notification Center; Linux needs `notify-send`.
 
 ## Running the tests
 
