@@ -75,12 +75,12 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 
 ## Features
 
-- URL input, quality presets (Best / 720p / 480p / Audio-only) or a raw custom format string
+- Paste any number of URLs (one per line) — they queue up and download one after another, each with its own status, progress bar and cancel. Add more while things are running; a failed one doesn't stop the rest. Titles fill in as yt-dlp resolves them.
+- Quality presets (Best / 720p / 480p / Audio-only) or a raw custom format string
 - Advanced tab covering format/merge options, filenames, playlists, subtitles, thumbnails/metadata, audio extraction, network (proxy/rate-limit/retries), auth & cookies, SponsorBlock, geo-bypass, post-run commands, debug flags, and a raw extra-arguments passthrough
 - Settings persist across launches (`~/.config/ytdlp-gui/settings.json`, password field never saved to disk) — **Import…**/**Export…** in the Advanced tab move a whole configuration between machines or back one up, same password exclusion applied
 - yt-dlp update check on launch (quietly skipped if offline) — the sidebar status turns yellow with an **Update to …** button when a newer release exists. Standalone-binary installs update in-app via `yt-dlp -U`, Homebrew via `brew upgrade yt-dlp`, pip installs via the script's own interpreter's `pip`; distro-package installs get the right package-manager command printed instead. Click the yt-dlp status line to re-check any time. yt-dlp's extractors break often as sites change, and "update yt-dlp" is almost always the fix, so this is worth keeping green.
-- Live progress bar, speed/ETA, and a separate streaming Log tab
-- Cancel an in-progress download
+- Live per-item progress, speed/ETA, and a separate streaming Log tab
 
 ## Running the tests
 

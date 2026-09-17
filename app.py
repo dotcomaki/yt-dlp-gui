@@ -345,11 +345,227 @@ def build_args(binary, settings, dest):
     return args
 
 
+DESTINATION_RE = re.compile(r"^\[(?:download|ExtractAudio|Merger)\]\s+(?:Destination:|Merging formats into)\s+\"?(?P<path>.+?)\"?$")
+# yt-dlp names intermediate per-format streams "Title.f137.mp4" before merging.
+FORMAT_SUFFIX_RE = re.compile(r"\.f\d+$")
+# With --write-subs the first Destination line is the subtitle file
+# ("Title.en.vtt"), which would leave a stray ".en" on the title — skip those
+# and take the title from the media file that follows.
+SUBTITLE_EXTS = {".vtt", ".srt", ".ass", ".ssa", ".lrc", ".ttml", ".tt", ".dfxp", ".sbv", ".json3", ".srv1", ".srv2", ".srv3"}
+
+TERMINAL_STATUSES = ("done", "failed", "cancelled")
+
+
+def title_from_log_line(line):
+    """The display title, lifted from yt-dlp's own '[download] Destination:'
+    line — no extra network call. None if the line isn't one (or is a
+    subtitle download)."""
+    m = DESTINATION_RE.match(line)
+    if not m:
+        return None
+    name, ext = os.path.splitext(os.path.basename(m.group("path")))
+    if ext.lower() in SUBTITLE_EXTS:
+        return None
+    return FORMAT_SUFFIX_RE.sub("", name)
+
+
+class DownloadQueue:
+    """Sequential download queue. Knows nothing about pywebview: `emit`
+    reports events to the UI and `runner` actually performs one job, so
+    both are injectable in tests. One worker thread at a time; a failed
+    or cancelled job never stops the ones behind it."""
+
+    def __init__(self, emit, runner):
+        self._emit = emit
+        self._runner = runner
+        self._jobs = []
+        self._lock = threading.Lock()
+        self._worker = None
+        self._next_id = 1
+
+    # --- public API -------------------------------------------------------
+
+    def enqueue(self, urls, settings, dest):
+        ids = []
+        with self._lock:
+            for url in urls:
+                url = (url or "").strip()
+                if not url:
+                    continue
+                job = {
+                    "id": self._next_id,
+                    "url": url,
+                    "dest": dest,
+                    "settings": json.loads(json.dumps(settings)),  # snapshot
+                    "status": "queued",
+                    "title": None,
+                    "pct": 0,
+                    "code": None,
+                    "proc": None,
+                    "cancel": False,
+                }
+                self._next_id += 1
+                self._jobs.append(job)
+                ids.append(job["id"])
+            start_worker = bool(ids) and not (self._worker and self._worker.is_alive())
+            if start_worker:
+                self._worker = threading.Thread(target=self._work, daemon=True)
+        if ids:
+            self._emit_queue()
+            if start_worker:
+                self._worker.start()
+        return ids
+
+    def cancel(self, job_id):
+        with self._lock:
+            job = self._find(job_id)
+            if not job:
+                return False
+            self._cancel_locked(job)
+        self._emit_queue()
+        return True
+
+    def cancel_all(self):
+        with self._lock:
+            for job in self._jobs:
+                if job["status"] in ("queued", "running"):
+                    self._cancel_locked(job)
+        self._emit_queue()
+        return True
+
+    def clear_finished(self):
+        with self._lock:
+            self._jobs = [j for j in self._jobs if j["status"] not in TERMINAL_STATUSES]
+        self._emit_queue()
+        return True
+
+    def remove(self, job_id):
+        """Drop one finished row. Active jobs must be cancelled first."""
+        with self._lock:
+            job = self._find(job_id)
+            if not job or job["status"] not in TERMINAL_STATUSES:
+                return False
+            self._jobs.remove(job)
+        self._emit_queue()
+        return True
+
+    def snapshot(self):
+        with self._lock:
+            return [self._public(j) for j in self._jobs]
+
+    def is_active(self):
+        with self._lock:
+            return any(j["status"] in ("queued", "running") for j in self._jobs)
+
+    # --- internals ----------------------------------------------------------
+
+    def _find(self, job_id):
+        return next((j for j in self._jobs if j["id"] == job_id), None)
+
+    def _public(self, job):
+        return {k: job[k] for k in ("id", "url", "status", "title", "pct", "code")}
+
+    def _emit_queue(self):
+        self._emit("ytdlp-queue", {"jobs": self.snapshot()})
+
+    def _cancel_locked(self, job):
+        job["cancel"] = True
+        if job["status"] == "queued":
+            job["status"] = "cancelled"
+        elif job["status"] == "running" and job["proc"] and job["proc"].poll() is None:
+            job["proc"].terminate()
+
+    def _next_job(self):
+        with self._lock:
+            job = next((j for j in self._jobs if j["status"] == "queued"), None)
+            if job:
+                job["status"] = "running"
+            return job
+
+    def _work(self):
+        while True:
+            job = self._next_job()
+            if not job:
+                return
+            self._emit_queue()
+            try:
+                code = self._runner(job, self._emit)
+            except Exception as e:
+                self._emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: {e}"})
+                code = -1
+            with self._lock:
+                job["code"] = code
+                job["proc"] = None
+                if job["cancel"]:
+                    job["status"] = "cancelled"
+                elif code == 0:
+                    job["status"] = "done"
+                    job["pct"] = 100
+                else:
+                    job["status"] = "failed"
+                status = job["status"]
+            self._emit("ytdlp-done", {
+                "jobId": job["id"],
+                "success": status == "done",
+                "cancelled": status == "cancelled",
+                "code": code,
+            })
+            self._emit_queue()
+
+
+def run_download_job(job, emit):
+    """Runs one queued job with yt-dlp, streaming log/progress events.
+    Returns the process exit code (-1 if it couldn't start)."""
+    binary = find_ytdlp()
+    if not binary:
+        emit("ytdlp-log", {"jobId": job["id"], "line": "Error: yt-dlp binary not found."})
+        return -1
+
+    os.makedirs(job["dest"], exist_ok=True)
+    try:
+        args = build_args(binary, job["settings"], job["dest"]) + [job["url"]]
+    except Exception as e:
+        emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: invalid settings: {e}"})
+        return -1
+
+    emit("ytdlp-log", {"jobId": job["id"], "line": f"$ {' '.join(shlex.quote(a) for a in args)}"})
+    try:
+        proc = subprocess.Popen(
+            args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+    except Exception as e:
+        emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: {e}"})
+        return -1
+    job["proc"] = proc
+    if job["cancel"]:  # cancelled in the gap before the process existed
+        proc.terminate()
+
+    for line in proc.stdout:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        emit("ytdlp-log", {"jobId": job["id"], "line": line})
+        title = title_from_log_line(line)
+        if title and not job["title"]:
+            job["title"] = title
+            emit("ytdlp-title", {"jobId": job["id"], "title": title})
+        m = PROGRESS_RE.search(line)
+        if m:
+            job["pct"] = float(m.group("pct"))
+            emit("ytdlp-progress", {
+                "jobId": job["id"],
+                "pct": job["pct"],
+                "size": m.group("size"),
+                "speed": m.group("speed") or "",
+                "eta": m.group("eta") or "",
+            })
+    return proc.wait()
+
+
 class Api:
     def __init__(self):
         self.window = None
-        self.proc = None
-        self.cancelled = False
+        self.queue = DownloadQueue(self._emit, run_download_job)
 
     def set_window(self, window):
         self.window = window
@@ -497,71 +713,28 @@ class Api:
             "version": version,
         })
 
-    def start_download(self, url, settings, dest):
-        threading.Thread(target=self._run_download, args=(url, settings, dest), daemon=True).start()
-        return True
+    def enqueue(self, urls, settings, dest):
+        return self.queue.enqueue(urls, settings, dest)
 
-    def cancel_download(self):
-        self.cancelled = True
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-        return True
+    def cancel_download(self, job_id):
+        return self.queue.cancel(job_id)
+
+    def cancel_all(self):
+        return self.queue.cancel_all()
+
+    def clear_finished(self):
+        return self.queue.clear_finished()
+
+    def remove_download(self, job_id):
+        return self.queue.remove(job_id)
+
+    def queue_snapshot(self):
+        return self.queue.snapshot()
 
     def _emit(self, event, payload):
         if self.window:
             js = f"window.dispatchEvent(new CustomEvent('{event}', {{detail: {json.dumps(payload)}}}))"
             self.window.evaluate_js(js)
-
-    def _run_download(self, url, settings, dest):
-        self.cancelled = False
-        binary = find_ytdlp()
-        if not binary:
-            self._emit("ytdlp-error", {"message": "yt-dlp binary not found."})
-            return
-
-        os.makedirs(dest, exist_ok=True)
-
-        try:
-            args = build_args(binary, settings, dest) + [url]
-        except Exception as e:
-            self._emit("ytdlp-error", {"message": f"Invalid settings: {e}"})
-            return
-
-        self._emit("ytdlp-log", {"line": f"$ {' '.join(shlex.quote(a) for a in args)}"})
-
-        try:
-            self.proc = subprocess.Popen(
-                args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-        except Exception as e:
-            self._emit("ytdlp-error", {"message": str(e)})
-            return
-
-        for line in self.proc.stdout:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            self._emit("ytdlp-log", {"line": line})
-            m = PROGRESS_RE.search(line)
-            if m:
-                self._emit("ytdlp-progress", {
-                    "pct": float(m.group("pct")),
-                    "size": m.group("size"),
-                    "speed": m.group("speed") or "",
-                    "eta": m.group("eta") or "",
-                })
-
-        code = self.proc.wait()
-        if self.cancelled:
-            self._emit("ytdlp-done", {"success": False, "cancelled": True})
-        elif code == 0:
-            self._emit("ytdlp-done", {"success": True, "cancelled": False})
-        else:
-            self._emit("ytdlp-done", {"success": False, "cancelled": False, "code": code})
 
 
 def main():
