@@ -219,6 +219,36 @@ def test_sponsorblock_empty_categories_omits_flag():
     assert "--sponsorblock-remove" not in args
 
 
+def test_sponsorblock_mark_only_categories_are_dropped_from_remove():
+    # poi_highlight/chapter are valid for --sponsorblock-mark but yt-dlp
+    # rejects them for --sponsorblock-remove; one shared list feeds both.
+    settings = {"sponsorblock": {"mark": True, "remove": True, "categories": "sponsor,poi_highlight,chapter"}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--sponsorblock-mark") == "sponsor,poi_highlight,chapter"
+    assert flag_value(args, "--sponsorblock-remove") == "sponsor"
+
+
+def test_sponsorblock_remove_omitted_when_only_mark_only_categories_selected():
+    settings = {"sponsorblock": {"mark": False, "remove": True, "categories": "poi_highlight,chapter"}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert "--sponsorblock-remove" not in args
+
+
+def test_sponsorblock_all_passes_through_to_remove_unchanged():
+    # yt-dlp interprets "all" itself for remove (it excludes the mark-only
+    # ones internally) — must not be expanded or filtered here.
+    settings = {"sponsorblock": {"mark": True, "remove": True, "categories": "all"}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--sponsorblock-remove") == "all"
+
+
+def test_sponsorblock_legacy_free_text_whitespace_is_normalized():
+    # Values saved by the pre-checkbox free-text field could contain spaces.
+    settings = {"sponsorblock": {"mark": True, "categories": " intro , outro,, "}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--sponsorblock-mark") == "intro,outro"
+
+
 def test_sponsorblock_categories_as_list():
     settings = {"sponsorblock": {"mark": True, "categories": ["sponsor", "selfpromo", "filler"]}}
     args = app.build_args("yt-dlp", settings, "/tmp")

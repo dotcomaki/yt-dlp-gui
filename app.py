@@ -32,6 +32,9 @@ PROGRESS_RE = re.compile(
     r"(?:\s+at\s+(?P<speed>[\d.]+\S+/s))?(?:\s+ETA\s+(?P<eta>\S+))?"
 )
 
+# Per `yt-dlp --help`: valid for --sponsorblock-mark but not --sponsorblock-remove.
+SPONSORBLOCK_MARK_ONLY = {"poi_highlight", "chapter"}
+
 QUALITY_FORMATS = {
     "best": "bestvideo+bestaudio/best",
     "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
@@ -303,10 +306,19 @@ def build_args(binary, settings, dest):
     categories = sb.get("categories") or ""
     if isinstance(categories, (list, tuple)):
         categories = ",".join(c for c in categories if c)
+    # Settings saved by the old free-text field may have spaces ("intro, outro").
+    categories = ",".join(c.strip() for c in categories.split(",") if c.strip())
     if sb.get("mark") and categories:
         args += ["--sponsorblock-mark", categories]
-    if sb.get("remove") and categories:
-        args += ["--sponsorblock-remove", categories]
+    if sb.get("remove"):
+        # yt-dlp rejects poi_highlight/chapter for --sponsorblock-remove
+        # (they're mark-only), and one shared category list feeds both
+        # flags — so drop them here rather than fail the whole download.
+        removable = ",".join(
+            c for c in categories.split(",") if c and c not in SPONSORBLOCK_MARK_ONLY
+        )
+        if removable:
+            args += ["--sponsorblock-remove", removable]
 
     # --- geo-restriction ---
     if geo.get("bypass"):

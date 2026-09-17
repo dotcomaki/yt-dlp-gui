@@ -174,6 +174,16 @@
     accent-color: var(--accent);
   }
 
+  .sb-all-row { margin-bottom: 4px; }
+  .sb-all-row label { font-weight: 600; }
+  .sb-categories {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 16px;
+    padding-left: 22px;
+  }
+  .hint-inline { color: var(--text-faint); font-size: 11px; }
+
   .field-row {
     display: flex;
     gap: 10px;
@@ -657,7 +667,57 @@
               </div>
               <div class="field">
                 <label>Categories</label>
-                <input type="text" data-bind="sponsorblock.categories" placeholder="all" />
+                <div class="checkbox-row sb-all-row">
+                  <input type="checkbox" id="cb-sbAll" />
+                  <label for="cb-sbAll">All categories</label>
+                </div>
+                <div class="sb-categories" id="sbCategories">
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-sponsor" value="sponsor" />
+                    <label for="cb-sb-sponsor">Sponsor</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-selfpromo" value="selfpromo" />
+                    <label for="cb-sb-selfpromo">Unpaid / self-promotion</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-interaction" value="interaction" />
+                    <label for="cb-sb-interaction">Interaction reminder</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-intro" value="intro" />
+                    <label for="cb-sb-intro">Intermission / intro</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-outro" value="outro" />
+                    <label for="cb-sb-outro">Endcards / credits</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-preview" value="preview" />
+                    <label for="cb-sb-preview">Preview / recap</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-hook" value="hook" />
+                    <label for="cb-sb-hook">Hook / greeting</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-filler" value="filler" />
+                    <label for="cb-sb-filler">Filler tangent</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-music_offtopic" value="music_offtopic" />
+                    <label for="cb-sb-music_offtopic">Non-music section</label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-poi_highlight" value="poi_highlight" />
+                    <label for="cb-sb-poi_highlight">Highlight <span class="hint-inline">(mark only)</span></label>
+                  </div>
+                  <div class="checkbox-row">
+                    <input type="checkbox" class="sb-cat" id="cb-sb-chapter" value="chapter" />
+                    <label for="cb-sb-chapter">Chapter <span class="hint-inline">(mark only)</span></label>
+                  </div>
+                </div>
+                <div class="hint">Unchecking everything disables marking/removing entirely. "Mark only" categories are skipped for removal — yt-dlp doesn't allow cutting them.</div>
               </div>
             </div>
 
@@ -775,7 +835,41 @@
 
   function refreshAllBoundInputs() {
     document.querySelectorAll('[data-bind]').forEach(el => refreshBoundInput(el.dataset.bind));
+    syncSponsorBlockUI();
   }
+
+  // --- SponsorBlock categories -----------------------------------------------
+  // settings.sponsorblock.categories stays the plain string yt-dlp takes
+  // ('all', '' for nothing, or 'sponsor,intro,...'), so persistence,
+  // import/export and build_args() are untouched — the checkboxes are just
+  // a view over it.
+  const sbAll = document.getElementById('cb-sbAll');
+  const sbCats = Array.from(document.querySelectorAll('.sb-cat'));
+
+  function syncSponsorBlockUI() {
+    const raw = (settings.sponsorblock.categories || '').trim();
+    const all = raw === 'all';
+    const selected = new Set(all ? [] : raw.split(',').map(s => s.trim()).filter(Boolean));
+    sbCats.forEach(cb => { cb.checked = all || selected.has(cb.value); });
+    const checked = sbCats.filter(cb => cb.checked).length;
+    sbAll.checked = checked === sbCats.length;
+    sbAll.indeterminate = checked > 0 && checked < sbCats.length;
+  }
+
+  function syncSponsorBlockSettings() {
+    const checked = sbCats.filter(cb => cb.checked).map(cb => cb.value);
+    settings.sponsorblock.categories =
+      checked.length === sbCats.length ? 'all' : checked.join(',');
+    sbAll.checked = checked.length === sbCats.length;
+    sbAll.indeterminate = checked.length > 0 && checked.length < sbCats.length;
+    saveSettings();
+  }
+
+  sbAll.addEventListener('change', () => {
+    sbCats.forEach(cb => { cb.checked = sbAll.checked; });
+    syncSponsorBlockSettings();
+  });
+  sbCats.forEach(cb => cb.addEventListener('change', syncSponsorBlockSettings));
 
   function syncPresetFromAudioCheckbox() {
     if (settings.audio.extractAudio && settings.preset !== 'audio') {
@@ -1050,6 +1144,7 @@
     } catch (err) {}
 
     bindInputs();
+    syncSponsorBlockUI();
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
 
