@@ -303,3 +303,48 @@ def test_blank_extra_args_adds_nothing():
     args_none = app.build_args("yt-dlp", {}, "/tmp")
     # same length as each other — nothing extra got appended
     assert len(args_empty) == len(args_whitespace) == len(args_none)
+
+
+# --- rate limit split across parallel downloads (#8) ----------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    ("50K", 50 * 1024),
+    ("4.2M", int(4.2 * 1024 ** 2)),
+    ("1G", 1024 ** 3),
+    ("1048576", 1048576),
+    (" 2m ", 2 * 1024 ** 2),
+    ("1MiB", 1024 ** 2),
+    ("", None),
+    (None, None),
+    ("fast", None),
+    ("1.2.3K", None),
+])
+def test_parse_rate_limit(text, expected):
+    assert app.parse_rate_limit(text) == expected
+
+
+def test_rate_limit_is_split_across_parallel_slots():
+    settings = {"network": {"rateLimit": "1M", "parallel": "2"}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--limit-rate") == str(1024 ** 2 // 2)
+
+
+def test_rate_limit_untouched_when_sequential():
+    settings = {"network": {"rateLimit": "1M", "parallel": "1"}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--limit-rate") == "1M"
+    # and with no parallel key at all (settings from before #8)
+    args = app.build_args("yt-dlp", {"network": {"rateLimit": "1M"}}, "/tmp")
+    assert flag_value(args, "--limit-rate") == "1M"
+
+
+def test_unparseable_rate_limit_passes_through_for_ytdlp_to_reject():
+    settings = {"network": {"rateLimit": "lots", "parallel": "3"}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--limit-rate") == "lots"
+
+
+@pytest.mark.parametrize("value,expected", [("2", 2), (3, 3), ("", 1), (None, 1), ("abc", 1), ("0", 1), ("-4", 1)])
+def test_parallel_from_settings(value, expected):
+    assert app.parallel_from_settings({"network": {"parallel": value}}) == expected
+    assert app.parallel_from_settings({}) == 1

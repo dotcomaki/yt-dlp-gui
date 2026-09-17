@@ -653,6 +653,18 @@
               <h3>Network</h3>
               <div class="field-row">
                 <div class="field">
+                  <label>Parallel downloads</label>
+                  <select data-bind="network.parallel">
+                    <option value="1">1 (one at a time)</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                  </select>
+                  <div class="hint">Applies to the queue immediately. The rate limit below is the <em>total</em> — it's split evenly across parallel slots.</div>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
                   <label>Proxy URL</label>
                   <input type="text" data-bind="network.proxy" placeholder="socks5://127.0.0.1:9050" />
                 </div>
@@ -849,7 +861,7 @@
     subtitles: { write: false, writeAuto: false, langs: 'en', embed: false },
     thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false },
     audio: { extractAudio: false, audioFormat: 'mp3', audioQuality: '', keepVideo: false },
-    network: { proxy: '', rateLimit: '', retries: '', socketTimeout: '', forceIpv4: false, forceIpv6: false },
+    network: { proxy: '', rateLimit: '', retries: '', socketTimeout: '', forceIpv4: false, forceIpv6: false, parallel: '2' },
     auth: { username: '', password: '', cookiesFile: '', cookiesFromBrowser: 'none' },
     sponsorblock: { mark: false, remove: false, categories: 'all' },
     geo: { bypass: false, bypassCountry: '' },
@@ -880,6 +892,7 @@
         const v = el.type === 'checkbox' ? el.checked : el.value;
         setPath(settings, path, v);
         if (path === 'audio.extractAudio') syncPresetFromAudioCheckbox();
+        if (path === 'network.parallel') window.pywebview.api.set_parallel(v);
         saveSettings();
       };
       el.addEventListener('input', handler);
@@ -1106,7 +1119,9 @@
     return row;
   }
 
+  let lastJobs = [];
   function renderQueue(jobs) {
+    lastJobs = jobs;
     queueList.innerHTML = '';
     if (!jobs.length) {
       const empty = document.createElement('div');
@@ -1237,7 +1252,14 @@
 
   window.addEventListener('ytdlp-queue', (e) => renderQueue(e.detail.jobs));
 
-  window.addEventListener('ytdlp-log', (e) => appendLog(e.detail.line));
+  window.addEventListener('ytdlp-log', (e) => {
+    // With parallel downloads the log interleaves; tag lines by job only
+    // while more than one is actually running, so the single-job log
+    // stays exactly as it always was.
+    const { jobId, line } = e.detail;
+    const running = lastJobs.filter(j => j.status === 'running').length;
+    appendLog(jobId != null && running > 1 ? `#${jobId}  ${line}` : line);
+  });
 
   window.addEventListener('ytdlp-title', (e) => {
     const row = rowFor(e.detail.jobId);

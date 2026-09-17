@@ -75,7 +75,7 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 
 ## Features
 
-- Paste any number of URLs (one per line) — they queue up and download one after another, each with its own status, progress bar and cancel. Add more while things are running; a failed one doesn't stop the rest. Titles fill in as yt-dlp resolves them.
+- Paste any number of URLs (one per line) — they queue up and download one after another, each with its own status, progress bar and cancel. Add more while things are running; a failed one doesn't stop the rest. Titles fill in as yt-dlp resolves them. **Parallel downloads** (Advanced → Network, default 2) run several at once; the rate limit is treated as the *total* and split evenly across slots, and the Log tab tags lines by job only while more than one is actually running.
 - Quality presets (Best / 720p / 480p / Audio-only) or a raw custom format string
 - Advanced tab covering format/merge options, filenames, playlists, subtitles, thumbnails/metadata, audio extraction, network (proxy/rate-limit/retries), auth & cookies, SponsorBlock, geo-bypass, post-run commands, debug flags, and a raw extra-arguments passthrough
 - Settings persist across launches (`~/.config/ytdlp-gui/settings.json`, password field never saved to disk) — **Import…**/**Export…** in the Advanced tab move a whole configuration between machines or back one up, same password exclusion applied

@@ -171,6 +171,37 @@ MANUAL_UPDATE_HINTS = {
 }
 
 
+RATE_RE = re.compile(r"^\s*(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>[kKmMgGtT])?(?:i?[bB])?\s*$")
+RATE_UNITS = {"k": 1024, "m": 1024 ** 2, "g": 1024 ** 3, "t": 1024 ** 4}
+
+
+def parse_rate_limit(text):
+    """'50K' / '4.2M' / '1048576' -> bytes per second, as yt-dlp reads
+    --limit-rate. None if it isn't something yt-dlp would accept either."""
+    m = RATE_RE.match(text or "")
+    if not m:
+        return None
+    mult = RATE_UNITS[m.group("unit").lower()] if m.group("unit") else 1
+    return int(float(m.group("num")) * mult)
+
+
+def per_process_rate_limit(text, parallel):
+    """The --limit-rate to give each of `parallel` concurrent yt-dlp
+    processes so the *total* stays at the user's limit. Unparseable input
+    is passed through untouched (yt-dlp will complain about it itself)."""
+    total = parse_rate_limit(text)
+    if total is None or parallel <= 1:
+        return text
+    return str(max(1, total // parallel))
+
+
+def parallel_from_settings(settings):
+    try:
+        return max(1, int((settings.get("network") or {}).get("parallel") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def sanitize_settings_payload(payload):
     """Never let the password field reach disk in plaintext, whether that's
     the regular auto-save location or an explicit export elsewhere."""
@@ -278,7 +309,9 @@ def build_args(binary, settings, dest):
     if net.get("proxy"):
         args += ["--proxy", net["proxy"]]
     if net.get("rateLimit"):
-        args += ["--limit-rate", net["rateLimit"]]
+        # The setting is the total; split it across parallel download slots.
+        parallel = parallel_from_settings(settings)
+        args += ["--limit-rate", per_process_rate_limit(net["rateLimit"], parallel)]
     if net.get("retries"):
         args += ["--retries", str(net["retries"])]
     if net.get("socketTimeout"):
@@ -375,12 +408,12 @@ class DownloadQueue:
     both are injectable in tests. One worker thread at a time; a failed
     or cancelled job never stops the ones behind it."""
 
-    def __init__(self, emit, runner):
+    def __init__(self, emit, runner, max_concurrent=1):
         self._emit = emit
         self._runner = runner
         self._jobs = []
         self._lock = threading.Lock()
-        self._worker = None
+        self._max_concurrent = max(1, int(max_concurrent))
         self._next_id = 1
 
     # --- public API -------------------------------------------------------
@@ -407,14 +440,18 @@ class DownloadQueue:
                 self._next_id += 1
                 self._jobs.append(job)
                 ids.append(job["id"])
-            start_worker = bool(ids) and not (self._worker and self._worker.is_alive())
-            if start_worker:
-                self._worker = threading.Thread(target=self._work, daemon=True)
         if ids:
             self._emit_queue()
-            if start_worker:
-                self._worker.start()
+            self._dispatch()
         return ids
+
+    def set_max_concurrent(self, n):
+        """How many jobs may run at once. Raising it mid-queue starts more
+        immediately; lowering it just stops new ones starting until the
+        running count drops — nothing in flight is interrupted."""
+        with self._lock:
+            self._max_concurrent = max(1, int(n or 1))
+        self._dispatch()
 
     def cancel(self, job_id):
         with self._lock:
@@ -475,42 +512,48 @@ class DownloadQueue:
         elif job["status"] == "running" and job["proc"] and job["proc"].poll() is None:
             job["proc"].terminate()
 
-    def _next_job(self):
+    def _dispatch(self):
+        """Start queued jobs until max_concurrent are running. Called after
+        anything that could free a slot or add work."""
+        to_start = []
         with self._lock:
-            job = next((j for j in self._jobs if j["status"] == "queued"), None)
-            if job:
-                job["status"] = "running"
-            return job
+            running = sum(1 for j in self._jobs if j["status"] == "running")
+            for job in self._jobs:
+                if running >= self._max_concurrent:
+                    break
+                if job["status"] == "queued":
+                    job["status"] = "running"
+                    running += 1
+                    to_start.append(job)
+        for job in to_start:
+            self._emit_queue()
+            threading.Thread(target=self._run_one, args=(job,), daemon=True).start()
 
-    def _work(self):
-        while True:
-            job = self._next_job()
-            if not job:
-                return
-            self._emit_queue()
-            try:
-                code = self._runner(job, self._emit)
-            except Exception as e:
-                self._emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: {e}"})
-                code = -1
-            with self._lock:
-                job["code"] = code
-                job["proc"] = None
-                if job["cancel"]:
-                    job["status"] = "cancelled"
-                elif code == 0:
-                    job["status"] = "done"
-                    job["pct"] = 100
-                else:
-                    job["status"] = "failed"
-                status = job["status"]
-            self._emit("ytdlp-done", {
-                "jobId": job["id"],
-                "success": status == "done",
-                "cancelled": status == "cancelled",
-                "code": code,
-            })
-            self._emit_queue()
+    def _run_one(self, job):
+        try:
+            code = self._runner(job, self._emit)
+        except Exception as e:
+            self._emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: {e}"})
+            code = -1
+        with self._lock:
+            job["code"] = code
+            job["proc"] = None
+            if job["cancel"]:
+                job["status"] = "cancelled"
+            elif code == 0:
+                job["status"] = "done"
+                job["pct"] = 100
+            else:
+                job["status"] = "failed"
+            status = job["status"]
+        self._emit("ytdlp-done", {
+            "jobId": job["id"],
+            "success": status == "done",
+            "cancelled": status == "cancelled",
+            "code": code,
+        })
+        self._emit_queue()
+        self._dispatch()
 
 
 def run_download_job(job, emit):
@@ -714,7 +757,12 @@ class Api:
         })
 
     def enqueue(self, urls, settings, dest):
+        self.queue.set_max_concurrent(parallel_from_settings(settings))
         return self.queue.enqueue(urls, settings, dest)
+
+    def set_parallel(self, n):
+        self.queue.set_max_concurrent(n)
+        return True
 
     def cancel_download(self, job_id):
         return self.queue.cancel(job_id)

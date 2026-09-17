@@ -349,3 +349,95 @@ def test_run_download_job_reports_missing_binary(monkeypatch):
            "status": "running", "title": None, "pct": 0, "code": None, "proc": None, "cancel": False}
     assert app.run_download_job(job, emit) == -1
     assert "not found" in emit.of("ytdlp-log")[0]["line"]
+
+
+# --- concurrency (#8) ----------------------------------------------------------------
+
+class Overlap:
+    """Runner that records how many jobs were in flight at once."""
+    def __init__(self, hold=0.15):
+        self.hold = hold
+        self.lock = threading.Lock()
+        self.running = 0
+        self.peak = 0
+        self.started = []
+
+    def __call__(self, job, emit):
+        with self.lock:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+            self.started.append(job["id"])
+        time.sleep(self.hold)
+        with self.lock:
+            self.running -= 1
+        return 0
+
+
+def test_default_is_sequential():
+    runner = Overlap()
+    q = app.DownloadQueue(Emit(), runner)
+    q.enqueue(["a", "b", "c"], {}, "/dl")
+    assert idle(q)
+    assert runner.peak == 1
+
+
+def test_max_concurrent_bounds_in_flight_jobs():
+    runner = Overlap()
+    q = app.DownloadQueue(Emit(), runner, max_concurrent=2)
+    t = time.time()
+    q.enqueue(["a", "b", "c", "d"], {}, "/dl")
+    assert idle(q)
+    elapsed = time.time() - t
+    assert runner.peak == 2
+    assert runner.started == [1, 2, 3, 4]           # still starts in queue order
+    assert elapsed < 4 * runner.hold                  # actually overlapped, not serialized
+    assert [j["status"] for j in q.snapshot()] == ["done"] * 4
+
+
+def test_raising_max_concurrent_mid_queue_starts_more_immediately():
+    runner = Overlap(hold=0.4)
+    q = app.DownloadQueue(Emit(), runner, max_concurrent=1)
+    q.enqueue(["a", "b", "c"], {}, "/dl")
+    assert wait_until(lambda: runner.running == 1)
+    q.set_max_concurrent(3)
+    assert wait_until(lambda: runner.running == 3, timeout=0.3), "extra slots didn't start"
+    assert idle(q)
+
+
+def test_lowering_max_concurrent_does_not_interrupt_running_jobs():
+    runner = Overlap(hold=0.3)
+    q = app.DownloadQueue(Emit(), runner, max_concurrent=2)
+    q.enqueue(["a", "b", "c"], {}, "/dl")
+    assert wait_until(lambda: runner.running == 2)
+    q.set_max_concurrent(1)
+    time.sleep(0.05)
+    assert runner.running == 2                         # nothing killed
+    assert idle(q)
+    assert [j["status"] for j in q.snapshot()] == ["done"] * 3
+    assert runner.peak == 2
+
+
+def test_cancel_all_with_parallel_running_jobs():
+    def runner(job, emit):
+        proc = subprocess.Popen(["sleep", "30"])
+        job["proc"] = proc
+        return proc.wait()
+
+    q = app.DownloadQueue(Emit(), runner, max_concurrent=2)
+    q.enqueue(["a", "b", "c"], {}, "/dl")
+    assert wait_until(lambda: sum(1 for j in q._jobs if j.get("proc")) == 2)
+    q.cancel_all()
+    assert idle(q)
+    assert [j["status"] for j in q.snapshot()] == ["cancelled"] * 3
+
+
+def test_api_enqueue_applies_parallel_setting():
+    api = app.Api()
+    api._emit = Emit()
+    runner = Overlap()
+    api.queue = app.DownloadQueue(api._emit, runner)
+    api.enqueue(["a", "b", "c", "d"], {"network": {"parallel": "2"}}, "/dl")
+    assert idle(api.queue)
+    assert runner.peak == 2
+    assert api.set_parallel(1) is True
+    assert api.queue._max_concurrent == 1
