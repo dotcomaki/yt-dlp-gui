@@ -305,3 +305,18 @@ def test_run_update_refuses_manual_only_installs(monkeypatch):
     assert event == "ytdlp-update-done"
     assert payload["success"] is False
     assert "package manager" in payload["error"]
+
+
+# --- update-done always fires (0g) ----------------------------------------------------
+
+def test_update_done_fires_even_if_reading_output_blows_up(monkeypatch, tmp_path):
+    exe = tmp_path / "yt-dlp"; exe.write_text("#!/bin/sh\necho updating\n"); exe.chmod(0o755)
+    monkeypatch.setattr(app, "find_ytdlp", lambda: str(exe))
+    monkeypatch.setattr(app, "detect_install_method", lambda p: ("standalone", None))
+    events = []
+    api = app.Api()
+    api.window = None
+    api._emit = lambda ev, payload: (_ for _ in ()).throw(RuntimeError("boom")) if ev == "ytdlp-log" and payload["line"] == "updating" else events.append((ev, payload))
+    api._run_update()
+    done = [p for e, p in events if e == "ytdlp-update-done"]
+    assert len(done) == 1 and done[0]["success"] is False and "boom" in done[0]["error"]

@@ -194,3 +194,32 @@ def test_playlist_entries_without_a_url_are_skipped_and_titles_fall_back_to_url(
 
 def test_video_info_has_no_entries_key():
     assert "entries" not in app.summarize_info({"title": "t"})
+
+
+# --- one lookup at a time (0c) ------------------------------------------------------
+
+def test_a_newer_fetch_kills_the_previous_one(tmp_path, monkeypatch):
+    import threading, time
+    exe = stub_ytdlp(tmp_path, "sleep 30\necho '{}'\n")
+    monkeypatch.setattr(app, "find_ytdlp", lambda: exe)
+    monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
+    api = app.Api()
+    results = {}
+    t = threading.Thread(target=lambda: results.update(first=api.fetch_info("https://one", {}, str(tmp_path))))
+    t.start()
+    time.sleep(0.3)
+    first_proc = api._info_proc
+    exe2 = stub_ytdlp(tmp_path / "b", "echo '{\"title\": \"two\"}'\n") if (tmp_path / "b").mkdir() is None else None
+    monkeypatch.setattr(app, "find_ytdlp", lambda: exe2)
+    second = api.fetch_info("https://two", {}, str(tmp_path))
+    t.join(5)
+    assert second["ok"] is True and second["title"] == "two"
+    assert results["first"] == {"ok": False, "error": "cancelled"}
+    assert first_proc.poll() is not None   # really gone, not just ignored
+
+
+def test_fetch_info_reports_broken_extra_args_cleanly(monkeypatch):
+    monkeypatch.setattr(app, "find_ytdlp", lambda: "/bin/echo")
+    monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
+    info = app.Api().fetch_info("https://v", {"extraArgs": "--foo 'unbalanced"}, "/tmp")
+    assert info["ok"] is False and "invalid extra arguments" in info["error"]

@@ -257,11 +257,63 @@ def test_sponsorblock_categories_as_list():
 
 # --- geo-restriction -----------------------------------------------------------
 
-def test_geo_options():
-    settings = {"geo": {"bypass": True, "bypassCountry": "US"}}
-    args = app.build_args("yt-dlp", settings, "/tmp")
-    assert "--geo-bypass" in args
-    assert flag_value(args, "--geo-bypass-country") == "US"
+def test_geo_country_maps_to_xff():
+    # --geo-bypass / --geo-bypass-country are deprecated aliases; --xff is the option
+    args = app.build_args("yt-dlp", {"geo": {"bypassCountry": " US "}}, "/tmp")
+    assert flag_value(args, "--xff") == "US"
+    assert "--geo-bypass" not in args and "--geo-bypass-country" not in args
+
+
+def test_geo_disable_wins_and_default_sends_nothing():
+    args = app.build_args("yt-dlp", {"geo": {"disable": True, "bypassCountry": "US"}}, "/tmp")
+    assert flag_value(args, "--xff") == "never"
+    args = app.build_args("yt-dlp", {"geo": {"bypass": True, "bypassCountry": ""}}, "/tmp")   # old settings key: ignored
+    assert "--xff" not in args
+
+
+# --- redaction of the logged command ----------------------------------------------
+
+def test_redact_masks_passwords_and_proxy_userinfo():
+    args = ["yt-dlp", "-u", "me", "-p", "hunter2", "--video-password", "vp", "--twofactor", "123456",
+            "--proxy", "socks5://alice:s3cret@proxy:1080", "--proxy", "http://proxy:8080", "https://v"]
+    out = app.redact_args(args)
+    assert out == ["yt-dlp", "-u", "me", "-p", "••••••", "--video-password", "••••••", "--twofactor", "••••••",
+                   "--proxy", "socks5://••••••@proxy:1080", "--proxy", "http://proxy:8080", "https://v"]
+    assert args[4] == "hunter2"   # the real argv is untouched
+
+
+def test_redact_leaves_ordinary_args_alone():
+    args = ["yt-dlp", "-f", "best", "-o", "/dl/%(title)s.%(ext)s", "https://v"]
+    assert app.redact_args(args) == args
+
+
+def test_logged_command_never_shows_the_password(tmp_path, monkeypatch):
+    exe = tmp_path / "yt-dlp"; exe.write_text("#!/bin/sh\nexit 0\n"); exe.chmod(0o755)
+    monkeypatch.setattr(app, "find_ytdlp", lambda: str(exe))
+    logs = []
+    job = {"id": 1, "url": "https://v", "dest": str(tmp_path), "title": None, "pct": 0, "files": [], "proc": None,
+           "cancel": False, "settings": {"auth": {"username": "u", "password": "hunter2"}, "network": {"proxy": "http://a:b@p:1"}}}
+    app.run_download_job(job, lambda ev, p: logs.append((ev, p)))
+    header = next(p["line"] for ev, p in logs if ev == "ytdlp-log" and p["line"].startswith("$ "))
+    assert "hunter2" not in header and "a:b@" not in header
+    assert "-p '••••••'" in header and "http://••••••@p:1" in header
+
+
+# --- no ffmpeg ------------------------------------------------------------------------
+
+def test_without_ffmpeg_presets_ask_for_a_single_merged_stream(monkeypatch):
+    monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
+    args = app.build_args("yt-dlp", {"preset": "best"}, "/tmp")
+    assert flag_value(args, "-f") == "best[vcodec!=none][acodec!=none]/best"
+    assert "--merge-output-format" not in args and "--ffmpeg-location" not in args
+    args = app.build_args("yt-dlp", {"preset": "720p"}, "/tmp")
+    assert flag_value(args, "-f") == "best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]"
+
+
+def test_without_ffmpeg_a_custom_format_is_still_respected(monkeypatch):
+    monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
+    args = app.build_args("yt-dlp", {"preset": "custom", "format": {"customFormat": "137+140"}}, "/tmp")
+    assert flag_value(args, "-f") == "137+140"   # the user asked for it explicitly; yt-dlp will say what's wrong
 
 
 # --- post-run command ------------------------------------------------------------

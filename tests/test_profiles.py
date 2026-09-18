@@ -35,7 +35,7 @@ def test_load_missing_or_broken_file_is_empty():
 
 def test_save_then_load_round_trips_without_the_password():
     api = app.Api()
-    assert api.save_profiles({"profiles": {"Archive": {"settings": {"preset": "best", "auth": {"password": "s3cret"}}, "destFolder": "/a"}}})
+    assert api.save_profiles({"profiles": {"Archive": {"settings": {"preset": "best", "auth": {"password": "s3cret"}}, "destFolder": "/a"}}}) == {"ok": True}
     with open(app.profiles_path()) as f:
         on_disk = json.load(f)
     assert on_disk["profiles"]["Archive"]["settings"]["auth"]["password"] == ""
@@ -46,3 +46,14 @@ def test_profiles_live_beside_settings():
     import os
     assert os.path.dirname(app.profiles_path()) == os.path.dirname(app.settings_path())
     assert os.path.dirname(app.history_path()) == os.path.dirname(app.settings_path())
+
+
+def test_save_failures_are_reported_not_swallowed(monkeypatch, tmp_path):
+    blocker = tmp_path / "blocker"; blocker.write_text("")            # a file where the config dir should be
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(blocker))
+    api = app.Api()
+    r = api.save_settings({"settings": {}})
+    assert r["ok"] is False and r["error"]
+    r = api.save_profiles({"profiles": {}})
+    assert r["ok"] is False and r["error"]
+    assert api.load_settings() is None                                  # and loading degrades to defaults, no crash

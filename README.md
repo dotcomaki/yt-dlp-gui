@@ -46,7 +46,7 @@ Clicking the extension's toolbar icon on a YouTube page launches the yt-dlp GUI 
 
 **How it works:** the extension talks to a native messaging host (`native-host/native_host.py`) registered with the browser.
 - **macOS:** launches via `open -a yt-dlp.app --args <url>` — a small self-locating app bundle checked into the repo (no `/Applications` install needed). This matters, not just for convenience: spawning `python3` as a *direct child* of the native messaging host inherits the browser's process ancestry for macOS's Gatekeeper "responsible launcher" tracking, which can trigger a false-positive "is damaged, move to Trash" dialog blaming the browser for a file it never touched — even for a correctly-signed, unquarantined interpreter. `open -a` hands the launch to LaunchServices as an independent process, breaking that ancestry chain.
-- **Linux:** runs `python3 app.py <url>` directly (no such Gatekeeper-equivalent issue exists there). Checks a few common `python3` install locations and picks the first one that actually has `pywebview` installed, since apps launched outside an interactive shell get a more minimal `PATH` than your Terminal does.
+- **Linux:** runs `python3 app.py <url>` directly (no such Gatekeeper-equivalent issue exists there). Checks the project's own `venv/` first, then a few common `python3` install locations, and uses the first one that exists — it deliberately doesn't execute candidates to probe them — since apps launched outside an interactive shell get a more minimal `PATH` than your Terminal does.
 
 **Setup:**
 
@@ -84,7 +84,7 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 - **Profiles** (Download tab): save the whole current configuration — every Advanced-tab option plus the destination folder — under a name like "Podcast" or "Archive", and switch between them from a dropdown. The dropdown shows "(modified)" once you've changed anything since applying one; **Save…** with the same name updates it. Stored in `profiles.json` beside the settings, same password exclusion.
 - **History** tab: every finished download (success or failure — cancellations aren't kept) with its title, time, quality, and the final file path as yt-dlp reported it after merging/extraction. **Reveal** shows the file in Finder (or opens its folder on Linux), **Again** re-queues it with the exact settings it was downloaded with, and there's per-row remove and Clear history. Capped at the newest 500 entries in `history.json`.
 - yt-dlp update check on launch (quietly skipped if offline) — the sidebar status turns yellow with an **Update to …** button when a newer release exists. Standalone-binary installs update in-app via `yt-dlp -U`, Homebrew via `brew upgrade yt-dlp`, pip installs via the script's own interpreter's `pip`; distro-package installs get the right package-manager command printed instead. Click the yt-dlp status line to re-check any time. yt-dlp's extractors break often as sites change, and "update yt-dlp" is almost always the fix, so this is worth keeping green.
-- Live per-item progress, speed/ETA, and a separate streaming Log tab
+- Live per-item progress, speed/ETA, and a separate streaming Log tab (Copy / Clear; capped at the newest 5,000 lines; passwords and proxy credentials are masked in the echoed command)
 - Desktop notification when the queue finishes (Advanced → Notifications, on by default) — one per batch with finished/failed counts, or the title when it's a single download. macOS via Notification Center; Linux needs `notify-send`.
 
 ## Running the tests

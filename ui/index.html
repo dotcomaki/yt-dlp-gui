@@ -226,6 +226,19 @@
     color: #fff;
   }
 
+  .form-error {
+    font-size: 11.5px;
+    color: var(--danger);
+    margin-top: 8px;
+  }
+  .log-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .log-toolbar .spacer { flex: 1; }
+  .log-toolbar .hint-inline { font-size: 11px; }
   .actions {
     display: flex;
     gap: 8px;
@@ -545,6 +558,7 @@
         <div class="status-line status-line-clickable" id="ytdlpStatusLine" title="Click to check for updates"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
         <div class="status-line"><span class="status-dot" id="ffmpegDot"></span><span id="ffmpegText">Checking ffmpeg…</span></div>
         <button class="small-btn update-btn" id="ytdlpUpdateBtn" hidden>Update</button>
+        <div class="status-line" id="configStatusLine" hidden><span class="status-dot err"></span><span id="configStatusText"></span></div>
       </div>
     </div>
 
@@ -627,6 +641,7 @@
         <div class="actions">
           <button class="btn-primary" id="downloadBtn">Download</button>
         </div>
+        <div class="form-error" id="downloadError" hidden></div>
 
         <div class="queue-section">
           <div class="queue-header">
@@ -958,13 +973,14 @@
 
             <div class="adv-category" id="adv-geo">
               <h3>Geo-restriction</h3>
-              <div class="checkbox-row">
-                <input type="checkbox" id="cb-geoBypass" data-bind="geo.bypass" />
-                <label for="cb-geoBypass">Bypass geo-restriction</label>
-              </div>
+              <p class="hint-inline">yt-dlp fakes an X-Forwarded-For header where it's known to help (its default). Override that here.</p>
               <div class="field">
-                <label>Bypass country code</label>
+                <label>Pretend to be in <span class="hint-inline">(two-letter country code, or an IP block in CIDR notation)</span></label>
                 <input type="text" data-bind="geo.bypassCountry" placeholder="US" />
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-geoDisable" data-bind="geo.disable" />
+                <label for="cb-geoDisable">Never fake the header (disable geo-bypass entirely)</label>
               </div>
             </div>
 
@@ -1016,6 +1032,12 @@
       <!-- Log tab -->
       <div class="panel" id="tab-log">
         <h2>Log</h2>
+        <div class="log-toolbar">
+          <button class="small-btn" id="logCopyBtn">Copy</button>
+          <button class="small-btn" id="logClearBtn">Clear</button>
+          <span class="spacer"></span>
+          <span class="hint-inline" id="logNote"></span>
+        </div>
         <div class="log" id="logBox"><span class="empty-log">Logs will appear here once a download starts…</span></div>
       </div>
 
@@ -1050,7 +1072,7 @@
     network: { proxy: '', rateLimit: '', retries: '', socketTimeout: '', forceIpv4: false, forceIpv6: false, parallel: '2' },
     auth: { username: '', password: '', cookiesFile: '', cookiesFromBrowser: 'none' },
     sponsorblock: { mark: false, remove: false, categories: 'all' },
-    geo: { bypass: false, bypassCountry: '' },
+    geo: { disable: false, bypassCountry: '' },
     postrun: { exec: '' },
     debug: { verbose: false, simulate: false, ignoreErrors: false },
     notifications: { enabled: true },
@@ -1064,10 +1086,23 @@
   let saveTimer = null;
   function saveSettings() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      window.pywebview.api.save_settings({ settings, destFolder: folderInput.value, profile: activeProfile });
+    saveTimer = setTimeout(async () => {
+      reportConfigWrite(await window.pywebview.api.save_settings({ settings, destFolder: folderInput.value, profile: activeProfile }));
     }, 400);
     renderProfiles();   // "(modified)" marker tracks every change
+  }
+
+  // A config write that fails (read-only ~/.config, full disk) would
+  // otherwise be invisible: everything looks saved until the next launch.
+  const configStatusLine = document.getElementById('configStatusLine');
+  const configStatusText = document.getElementById('configStatusText');
+  function reportConfigWrite(result) {
+    const failed = result && result.ok === false;
+    configStatusLine.hidden = !failed;
+    if (failed) {
+      configStatusText.textContent = 'Settings not saved';
+      configStatusLine.title = result.error || '';
+    }
   }
 
   function bindInputs() {
@@ -1274,8 +1309,8 @@
     if (deleteArmed !== activeProfile) disarmDelete();
   }
 
-  function persistProfiles() {
-    return window.pywebview.api.save_profiles({ profiles });
+  async function persistProfiles() {
+    reportConfigWrite(await window.pywebview.api.save_profiles({ profiles }));
   }
 
   profileSelect.addEventListener('change', () => {
@@ -1348,14 +1383,44 @@
   const logBox = document.getElementById('logBox');
   let logStarted = false;
 
+  // --newline progress × parallel jobs × a long playlist is tens of
+  // thousands of lines; keep the DOM bounded by dropping the oldest.
+  const LOG_MAX_LINES = 5000;
+  let logDropped = 0;
+  const logNote = document.getElementById('logNote');
+
   function appendLog(text, cls) {
-    if (!logStarted) { logBox.innerHTML = ''; logStarted = true; }
+    if (!logStarted) { logBox.innerHTML = ''; logStarted = true; logDropped = 0; logNote.textContent = ''; }
     const line = document.createElement('div');
     if (cls) line.className = cls;
     line.textContent = text;
     logBox.appendChild(line);
+    while (logBox.childElementCount > LOG_MAX_LINES) {
+      logBox.removeChild(logBox.firstElementChild);
+      logDropped++;
+    }
+    if (logDropped) logNote.textContent = `${logDropped.toLocaleString()} older lines dropped`;
     logBox.scrollTop = logBox.scrollHeight;
   }
+
+  document.getElementById('logClearBtn').addEventListener('click', () => {
+    logBox.innerHTML = '';
+    logStarted = true;
+    logDropped = 0;
+    logNote.textContent = '';
+  });
+
+  document.getElementById('logCopyBtn').addEventListener('click', async () => {
+    const text = Array.from(logBox.children).map(el => el.textContent).join('\n');
+    const btn = document.getElementById('logCopyBtn');
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = 'Copied';
+    } catch (err) {
+      btn.textContent = 'Copy failed';
+    }
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  });
 
   // `downloading` = anything queued or running. The Download button never
   // disables (you can keep adding), but the yt-dlp Update button does —
@@ -1718,16 +1783,29 @@
 
   downloadBtn.addEventListener('click', async () => {
     let urls = parseUrls(urlInput.value);
-    if (!urls.length) { appendLog('Please enter at least one URL.', 'err-line'); return; }
+    if (!urls.length) { showDownloadError('Enter at least one URL.'); return; }
     const picked = pickedEntries(urls[0]);
     if (picked) {
-      if (!picked.length) { appendLog('No playlist videos selected.', 'err-line'); return; }
+      if (!picked.length) { showDownloadError('No playlist videos selected.'); return; }
       urls = picked.concat(urls.slice(1));
     }
+    showDownloadError(null);
     urlInput.value = '';
     clearTimeout(previewTimer); previewSeq++; hidePreview();
     await startBatch(urls, settings, folderInput.value);
   });
+
+  // Validation feedback lives next to the button — the Log tab isn't
+  // visible from here, so logging there looked like nothing happened.
+  const downloadError = document.getElementById('downloadError');
+  let downloadErrorTimer = null;
+  function showDownloadError(text) {
+    clearTimeout(downloadErrorTimer);
+    downloadError.hidden = !text;
+    downloadError.textContent = text || '';
+    if (text) downloadErrorTimer = setTimeout(() => { downloadError.hidden = true; }, 4000);
+  }
+  urlInput.addEventListener('input', () => showDownloadError(null));
 
   async function startBatch(items, batchSettings, dest) {
     // Fresh batch on an idle queue starts a fresh log; adding while things
@@ -1921,7 +1999,8 @@
         ffmpegText.textContent = 'ffmpeg found';
       } else {
         ffmpegDot.classList.add('err');
-        ffmpegText.textContent = 'ffmpeg missing';
+        ffmpegText.textContent = 'ffmpeg missing — max 720p, no merging';
+        ffmpegText.parentElement.title = 'Without ffmpeg, separate video and audio streams can\'t be merged, so downloads fall back to the best single stream (720p at most on YouTube). Install it: brew install ffmpeg (macOS) or sudo apt install ffmpeg (Linux), then relaunch.';
       }
     } catch (err) {
       ytdlpText.textContent = 'Backend not ready';

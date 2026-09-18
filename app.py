@@ -3,6 +3,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import ssl
 import subprocess
 import sys
@@ -43,6 +44,14 @@ QUALITY_FORMATS = {
     "audio": "bestaudio/best",
 }
 
+# What the presets degrade to when ffmpeg is missing: a single stream that
+# already contains both video and audio, so nothing needs merging.
+NO_FFMPEG_FORMATS = {
+    "best": "best[vcodec!=none][acodec!=none]/best",
+    "720p": "best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]",
+    "480p": "best[height<=480][vcodec!=none][acodec!=none]/best[height<=480]",
+}
+
 
 def _first_executable(candidates):
     for path in candidates:
@@ -64,6 +73,19 @@ def config_path(name):
     config_dir = os.path.join(config_home, "ytdlp-gui")
     os.makedirs(config_dir, exist_ok=True)
     return os.path.join(config_dir, name)
+
+
+def write_config_file(path_fn, data):
+    """{"ok": True} or {"ok": False, "error": "..."} — the UI shows the
+    error in the sidebar, since silently not persisting is the worst
+    outcome. path_fn is called here so a failure to create the config
+    dir is reported the same way as a failure to write the file."""
+    try:
+        with open(path_fn(), "w") as f:
+            json.dump(data, f, indent=2)
+        return {"ok": True}
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
 
 
 def settings_path():
@@ -233,6 +255,32 @@ def sanitize_settings_payload(payload):
     return payload
 
 
+SECRET_FLAGS = {"-p", "--password", "--video-password", "--ap-password", "--twofactor", "-2"}
+PROXY_FLAGS = {"--proxy", "--geo-verification-proxy"}
+
+
+def redact_args(args):
+    """The argv as it's safe to show in the Log: password values masked,
+    userinfo stripped from proxy URLs. The real argv still carries them —
+    only the echo is scrubbed (settings.json never had them: see
+    sanitize_settings_payload)."""
+    out = []
+    hide_next = False
+    strip_userinfo_next = False
+    for a in args:
+        if hide_next:
+            out.append("••••••")
+            hide_next = False
+        elif strip_userinfo_next:
+            out.append(re.sub(r"^([a-z0-9+.-]+://)[^@/]*@", r"\1••••••@", a, flags=re.I))
+            strip_userinfo_next = False
+        else:
+            out.append(a)
+            hide_next = a in SECRET_FLAGS
+            strip_userinfo_next = a in PROXY_FLAGS
+    return out
+
+
 def build_args(binary, settings, dest):
     """Translate the settings dict from the UI into a yt-dlp argv list."""
     preset = settings.get("preset", "best")
@@ -282,6 +330,12 @@ def build_args(binary, settings, dest):
         args += ["--audio-format", audio.get("audioFormat") or "mp3"]
         if audio.get("audioQuality"):
             args += ["--audio-quality", str(audio["audioQuality"])]
+    elif not ffmpeg_path and not custom_format:
+        # Without ffmpeg there is nothing to merge separate video+audio
+        # streams with — yt-dlp would download two files and leave them.
+        # Ask for the best single pre-merged stream instead (720p at most
+        # on YouTube) rather than silently producing a silent video.
+        args += ["-f", NO_FFMPEG_FORMATS.get(preset, NO_FFMPEG_FORMATS["best"])]
     else:
         args += ["-f", custom_format or QUALITY_FORMATS.get(preset, QUALITY_FORMATS["best"])]
         merge_fmt = fmt.get("mergeOutputFormat") or "mp4"
@@ -372,10 +426,14 @@ def build_args(binary, settings, dest):
             args += ["--sponsorblock-remove", removable]
 
     # --- geo-restriction ---
-    if geo.get("bypass"):
-        args.append("--geo-bypass")
-    if geo.get("bypassCountry"):
-        args += ["--geo-bypass-country", geo["bypassCountry"]]
+    # --geo-bypass / --geo-bypass-country are deprecated aliases (gone from
+    # --help); --xff is the option now. yt-dlp's own default ("default":
+    # fake the header only where known to help) needs no flag, so only the
+    # two real choices are sent: a specific country/CIDR, or never.
+    if geo.get("disable"):
+        args += ["--xff", "never"]
+    elif (geo.get("bypassCountry") or "").strip():
+        args += ["--xff", geo["bypassCountry"].strip()]
 
     # --- post-run command ---
     if postrun.get("exec"):
@@ -556,7 +614,7 @@ class DownloadQueue:
         if job["status"] == "queued":
             job["status"] = "cancelled"
         elif job["status"] == "running" and job["proc"] and job["proc"].poll() is None:
-            job["proc"].terminate()
+            terminate_job(job["proc"])
 
     def _dispatch(self):
         """Start queued jobs until max_concurrent are running. Called after
@@ -760,6 +818,22 @@ FILE_MARKER = "\x1e__ytdlpgui_file__\x1e"
 FILE_PRINT_ARGS = ["--no-quiet", "--print", f"after_move:{FILE_MARKER}%(filepath)s"]
 
 
+def terminate_job(proc):
+    """SIGTERM the job's whole process group (yt-dlp plus any ffmpeg it is
+    running for a merge/recode/extract), falling back to just the process
+    when it wasn't started as a session leader."""
+    try:
+        pgid = os.getpgid(proc.pid)
+        if pgid == os.getpgrp():
+            raise OSError("not a session leader")   # would take us down too
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+
+
 def run_download_job(job, emit):
     """Runs one queued job with yt-dlp, streaming log/progress events.
     Returns the process exit code (-1 if it couldn't start)."""
@@ -777,18 +851,21 @@ def run_download_job(job, emit):
 
     # The log shows the command as the user's settings produced it; the
     # --print plumbing that feeds the history is spliced in only for the run.
-    emit("ytdlp-log", {"jobId": job["id"], "line": f"$ {' '.join(shlex.quote(a) for a in args)}"})
+    emit("ytdlp-log", {"jobId": job["id"], "line": f"$ {' '.join(shlex.quote(a) for a in redact_args(args))}"})
     try:
+        # Own process group, so cancelling reaches the ffmpeg yt-dlp spawns
+        # for merging/recoding — not just yt-dlp itself (see terminate_job).
         proc = subprocess.Popen(
             args[:-1] + FILE_PRINT_ARGS + args[-1:],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            start_new_session=True,
         )
     except Exception as e:
         emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: {e}"})
         return -1
     job["proc"] = proc
     if job["cancel"]:  # cancelled in the gap before the process existed
-        proc.terminate()
+        terminate_job(proc)
 
     for line in proc.stdout:
         line = line.rstrip("\n")
@@ -907,6 +984,8 @@ class Api:
         self.queue = DownloadQueue(self._emit, run_download_job)
         self.notifier = send_notification
         self._history_lock = threading.Lock()   # parallel jobs can finish together
+        self._info_lock = threading.Lock()
+        self._info_proc = None                   # the in-flight preview lookup, if any
 
     def set_window(self, window):
         self.window = window
@@ -926,17 +1005,12 @@ class Api:
         try:
             with open(settings_path()) as f:
                 return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError):   # missing, unreadable, or a config dir we can't create
             return None
 
     def save_settings(self, payload):
         payload = sanitize_settings_payload(payload)
-        try:
-            with open(settings_path(), "w") as f:
-                json.dump(payload, f, indent=2)
-            return True
-        except Exception:
-            return False
+        return write_config_file(settings_path, payload)
 
     def export_settings(self, payload):
         result = self.window.create_file_dialog(
@@ -982,13 +1056,7 @@ class Api:
             return {"profiles": {}}
 
     def save_profiles(self, data):
-        data = sanitize_profiles(data)
-        try:
-            with open(profiles_path(), "w") as f:
-                json.dump(data, f, indent=2)
-            return True
-        except Exception:
-            return False
+        return write_config_file(profiles_path, sanitize_profiles(data))
 
     # --- history ---
 
@@ -1096,43 +1164,64 @@ class Api:
             self._emit("ytdlp-update-done", {"success": False, "error": str(e)})
             return
 
-        for line in proc.stdout:
-            line = line.rstrip("\n")
-            if line:
-                self._emit("ytdlp-log", {"line": line})
-        code = proc.wait()
-
-        version = None
+        # Whatever happens from here, the UI must hear ytdlp-update-done or
+        # its Update button stays wedged on "Updating…".
+        code, version, error = -1, None, None
         try:
-            version = ytdlp_version(find_ytdlp() or path)
-        except Exception:
-            pass
-        self._emit("ytdlp-update-done", {
-            "success": code == 0,
-            "code": code,
-            "version": version,
-        })
+            for line in proc.stdout:
+                line = line.rstrip("\n")
+                if line:
+                    self._emit("ytdlp-log", {"line": line})
+            code = proc.wait()
+            try:
+                version = ytdlp_version(find_ytdlp() or path)
+            except Exception:
+                pass
+        except Exception as e:
+            error = str(e)
+        finally:
+            done = {"success": code == 0 and error is None, "code": code, "version": version}
+            if error:
+                done["error"] = error
+            self._emit("ytdlp-update-done", done)
 
     def fetch_info(self, url, settings, dest):
         """Metadata for the preview card. Runs yt-dlp -J synchronously — the
-        JS side awaits it off the UI thread and drops stale responses."""
+        JS side awaits it off the UI thread and drops stale responses. Only
+        one lookup runs at a time: a new one kills the previous, since the
+        UI has already moved on from whatever that would have answered."""
         binary = find_ytdlp()
         if not binary:
             return {"ok": False, "error": "yt-dlp not found"}
         try:
-            proc = subprocess.run(
-                info_args(binary, settings, dest, url),
-                capture_output=True, text=True, timeout=90,
-            )
+            args = info_args(binary, settings, dest, url)
+        except ValueError as e:   # shlex on a broken Extra Arguments string
+            return {"ok": False, "error": f"invalid extra arguments: {e}"}
+        with self._info_lock:
+            old = self._info_proc
+            if old and old.poll() is None:
+                terminate_job(old)
+            try:
+                proc = subprocess.Popen(
+                    args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    start_new_session=True,
+                )
+            except OSError as e:
+                return {"ok": False, "error": str(e)}
+            self._info_proc = proc
+        try:
+            stdout, stderr = proc.communicate(timeout=90)
         except subprocess.TimeoutExpired:
+            terminate_job(proc)
+            proc.communicate()
             return {"ok": False, "error": "timed out"}
-        except OSError as e:
-            return {"ok": False, "error": str(e)}
-        if proc.returncode != 0 or not proc.stdout.strip():
-            err = (proc.stderr or "").strip().splitlines()
+        if proc.returncode != 0 or not stdout.strip():
+            if proc.returncode < 0:
+                return {"ok": False, "error": "cancelled"}   # superseded by a newer lookup
+            err = (stderr or "").strip().splitlines()
             return {"ok": False, "error": err[-1] if err else f"yt-dlp exited with code {proc.returncode}"}
         try:
-            data = json.loads(proc.stdout)
+            data = json.loads(stdout)
         except json.JSONDecodeError:
             return {"ok": False, "error": "couldn't parse yt-dlp's output"}
         info = summarize_info(data)

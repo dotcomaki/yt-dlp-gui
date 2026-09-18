@@ -208,6 +208,26 @@ def test_cancel_queued_job_never_runs():
     assert [j["status"] for j in q.snapshot()] == ["done", "cancelled"]
 
 
+def test_terminate_job_kills_the_whole_process_group():
+    # yt-dlp runs ffmpeg as a child for merging; cancelling must reach it too.
+    # A shell that spawns a grandchild sleep and waits stands in for that.
+    proc = subprocess.Popen(["sh", "-c", "sleep 30 & echo $!; wait"], stdout=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    child_pid = int(proc.stdout.readline())
+    app.terminate_job(proc)
+    proc.wait(timeout=5)
+    assert wait_until(lambda: subprocess.run(["kill", "-0", str(child_pid)], capture_output=True).returncode != 0)
+
+
+def test_terminate_job_never_signals_our_own_process_group():
+    # A process that isn't a session leader shares pytest's group: killpg
+    # there would take the test runner down. Fall back to terminate().
+    proc = subprocess.Popen(["sleep", "30"])
+    app.terminate_job(proc)
+    assert proc.wait(timeout=5) != 0
+    # ...and we're still alive to assert it.
+
+
 def test_cancel_running_job_terminates_the_real_process():
     emit = Emit()
 
