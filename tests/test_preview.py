@@ -110,7 +110,7 @@ def test_playlist_info_is_flat_and_counts_entries():
     })
     assert info == {
         "kind": "playlist", "title": "My List", "uploader": "someone", "count": 3,
-        "thumbnail": "https://i/b.jpg", "url": "https://p", "formats": [],
+        "thumbnail": "https://i/b.jpg", "url": "https://p", "formats": [], "entries": [],
     }
 
 
@@ -168,3 +168,29 @@ def test_fetch_info_handles_garbage_output(tmp_path, monkeypatch):
 def test_fetch_info_without_ytdlp(monkeypatch):
     monkeypatch.setattr(app, "find_ytdlp", lambda: None)
     assert app.Api().fetch_info("https://v", {}, "/tmp") == {"ok": False, "error": "yt-dlp not found"}
+
+
+# --- playlist entries (#2) ------------------------------------------------------------
+
+def test_playlist_entries_are_surfaced_in_order_with_title_and_duration():
+    info = app.summarize_info({
+        "_type": "playlist", "title": "L", "entries": [
+            {"_type": "url", "url": "https://v/1", "title": "One", "duration": 61.9, "uploader": "a"},
+            {"_type": "url", "url": "https://v/2", "title": "Two", "channel": "b"},
+            {"_type": "url", "webpage_url": "https://v/3", "title": "Three", "duration": 5},
+        ],
+    })
+    assert info["entries"] == [
+        {"url": "https://v/1", "title": "One", "duration": 61, "uploader": "a"},
+        {"url": "https://v/2", "title": "Two", "duration": None, "uploader": "b"},
+        {"url": "https://v/3", "title": "Three", "duration": 5, "uploader": ""},
+    ]
+
+
+def test_playlist_entries_without_a_url_are_skipped_and_titles_fall_back_to_url():
+    info = app.summarize_info({"_type": "playlist", "entries": [None, {"title": "no url"}, {"url": "https://v/x"}]})
+    assert info["entries"] == [{"url": "https://v/x", "title": "https://v/x", "duration": None, "uploader": ""}]
+
+
+def test_video_info_has_no_entries_key():
+    assert "entries" not in app.summarize_info({"title": "t"})

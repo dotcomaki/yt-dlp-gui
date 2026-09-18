@@ -320,6 +320,41 @@
   .preview-formats tbody tr.is-selected td:last-child::after { content: "\2713"; color: var(--accent); }
   .preview-formats .hint { padding: 6px 8px; }
 
+  /* Playlist picker: one checkbox row per entry, all selected by default */
+  .preview-entries {
+    margin-top: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    font-size: 11.5px;
+  }
+  .preview-entries-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .preview-entries-head label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .preview-entries-head .count { margin-left: auto; }
+  .preview-entries-list { max-height: 240px; overflow: auto; }
+  .preview-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .preview-entry:last-child { border-bottom: 0; }
+  .preview-entry:hover { background: var(--bg-field); }
+  .preview-entry input { flex-shrink: 0; margin: 0; }
+  .preview-entry .idx { color: var(--text-faint); min-width: 2.2em; text-align: right; flex-shrink: 0; }
+  .preview-entry .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .preview-entry .dur { color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .preview-entry.is-off .name { color: var(--text-dim); }
+
   /* Download queue */
   .queue-section { margin-top: 18px; }
   .queue-header {
@@ -528,6 +563,13 @@
               <tbody id="previewFormatsBody"></tbody>
             </table>
             <div class="hint">Click a row to use it as the custom format. Video-only streams get <code>+bestaudio</code> merged in automatically.</div>
+          </div>
+          <div class="preview-entries" id="previewEntries" hidden>
+            <div class="preview-entries-head">
+              <label><input type="checkbox" id="previewEntriesAll" checked /> All</label>
+              <span class="count" id="previewEntriesCount"></span>
+            </div>
+            <div class="preview-entries-list" id="previewEntriesList"></div>
           </div>
         </div>
 
@@ -1349,10 +1391,16 @@
   const previewFormatsBtn = document.getElementById('previewFormatsBtn');
   const previewFormats = document.getElementById('previewFormats');
   const previewFormatsBody = document.getElementById('previewFormatsBody');
+  const previewEntries = document.getElementById('previewEntries');
+  const previewEntriesAll = document.getElementById('previewEntriesAll');
+  const previewEntriesCount = document.getElementById('previewEntriesCount');
+  const previewEntriesList = document.getElementById('previewEntriesList');
   let previewTimer = null;
   let previewSeq = 0;          // drops responses for URLs the user has already moved on from
   let previewUrl = null;       // what the current card describes
   let previewFormatRows = [];
+  let previewEntryRows = [];   // playlist entries, in playlist order
+  let previewPicked = new Set();   // indices into previewEntryRows the user has ticked
 
   function looksLikeUrl(s) {
     return /^(https?:\/\/|www\.)/i.test(s);
@@ -1366,16 +1414,22 @@
 
   function hidePreview() {
     previewUrl = null;
+    previewEntryRows = [];
+    previewPicked = new Set();
     preview.hidden = true;
     previewCard.hidden = true;
     previewStatus.hidden = true;
     previewFormats.hidden = true;
+    previewEntries.hidden = true;
   }
 
   function showPreviewStatus(text, isError) {
+    previewEntryRows = [];
+    previewPicked = new Set();
     preview.hidden = false;
     previewCard.hidden = true;
     previewFormats.hidden = true;
+    previewEntries.hidden = true;
     previewStatus.hidden = false;
     previewStatus.textContent = text;
     previewStatus.classList.toggle('is-error', !!isError);
@@ -1404,6 +1458,55 @@
     previewFormatsBtn.hidden = previewFormatRows.length === 0;
     previewFormatsBtn.textContent = `Formats (${previewFormatRows.length})`;
     renderFormatRows();
+    previewEntryRows = info.kind === 'playlist' ? (info.entries || []) : [];
+    previewPicked = new Set(previewEntryRows.map((_, i) => i));   // everything on, as a plain playlist download would be
+    renderEntryRows();
+  }
+
+  // --- Playlist picker ------------------------------------------------------
+  function renderEntryRows() {
+    previewEntriesList.innerHTML = '';
+    previewEntries.hidden = previewEntryRows.length === 0;
+    previewEntryRows.forEach((e, i) => {
+      const row = document.createElement('label');
+      row.className = 'preview-entry';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = previewPicked.has(i);
+      cb.addEventListener('change', () => {
+        if (cb.checked) previewPicked.add(i); else previewPicked.delete(i);
+        row.classList.toggle('is-off', !cb.checked);
+        updateEntriesHead();
+      });
+      const idx = document.createElement('span'); idx.className = 'idx'; idx.textContent = String(i + 1);
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = e.title; name.title = e.title;
+      const dur = document.createElement('span'); dur.className = 'dur'; dur.textContent = formatDuration(e.duration);
+      row.append(cb, idx, name, dur);
+      row.classList.toggle('is-off', !cb.checked);
+      previewEntriesList.appendChild(row);
+    });
+    updateEntriesHead();
+  }
+
+  function updateEntriesHead() {
+    const n = previewPicked.size, total = previewEntryRows.length;
+    previewEntriesCount.textContent = `${n} of ${total} selected`;
+    previewEntriesAll.checked = n === total && total > 0;
+    previewEntriesAll.indeterminate = n > 0 && n < total;
+  }
+
+  previewEntriesAll.addEventListener('change', () => {
+    previewPicked = previewEntriesAll.checked ? new Set(previewEntryRows.map((_, i) => i)) : new Set();
+    renderEntryRows();
+  });
+
+  // The URLs to enqueue for the first line: the ticked playlist entries when
+  // the card describes it as a playlist, otherwise the line as typed. If the
+  // lookup hasn't finished (or failed), the raw URL goes through as one job
+  // and yt-dlp handles the playlist itself, same as before the picker.
+  function pickedEntries(firstUrl) {
+    if (!previewEntryRows.length || firstUrl !== previewUrl) return null;
+    return previewEntryRows.filter((_, i) => previewPicked.has(i)).map(e => ({ url: e.url, title: e.title }));
   }
 
   function formatSelector(f) {
@@ -1462,8 +1565,13 @@
   urlInput.addEventListener('input', schedulePreview);
 
   downloadBtn.addEventListener('click', async () => {
-    const urls = parseUrls(urlInput.value);
+    let urls = parseUrls(urlInput.value);
     if (!urls.length) { appendLog('Please enter at least one URL.', 'err-line'); return; }
+    const picked = pickedEntries(urls[0]);
+    if (picked) {
+      if (!picked.length) { appendLog('No playlist videos selected.', 'err-line'); return; }
+      urls = picked.concat(urls.slice(1));
+    }
     // Fresh batch on an idle queue starts a fresh log; adding while things
     // run keeps the current job's output.
     if (!downloading) { logStarted = false; logBox.innerHTML = ''; }

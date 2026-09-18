@@ -82,6 +82,18 @@ def test_enqueue_skips_blank_urls_and_empty_input_is_a_noop():
     assert q.snapshot()[0]["url"] == "https://a"
 
 
+def test_enqueue_accepts_url_title_dicts_and_seeds_the_title():
+    emit = Emit()
+    gate = threading.Event()
+    q = app.DownloadQueue(emit, runner=lambda job, emit: gate.wait(5) and 0)
+    ids = q.enqueue([{"url": " https://a ", "title": "One"}, {"url": "https://b"}, {"title": "no url"}, "https://c"], {}, "/dl")
+    assert ids == [1, 2, 3]
+    snap = {j["url"]: j["title"] for j in q.snapshot()}
+    assert snap == {"https://a": "One", "https://b": None, "https://c": None}  # title shows before any Destination line
+    gate.set()
+    assert idle(q)
+
+
 def test_every_mutation_emits_a_queue_snapshot():
     emit = Emit()
     q = app.DownloadQueue(emit, runner=lambda job, emit: 0)

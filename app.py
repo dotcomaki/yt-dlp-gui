@@ -424,10 +424,17 @@ class DownloadQueue:
     # --- public API -------------------------------------------------------
 
     def enqueue(self, urls, settings, dest):
+        """`urls` items are plain strings, or {"url", "title"} dicts when the
+        caller already knows the title (playlist picker) so the row doesn't
+        have to show the URL until yt-dlp prints a Destination line."""
         ids = []
         with self._lock:
-            for url in urls:
-                url = (url or "").strip()
+            for item in urls:
+                title = None
+                if isinstance(item, dict):
+                    title = (item.get("title") or "").strip() or None
+                    item = item.get("url")
+                url = (item or "").strip()
                 if not url:
                     continue
                 job = {
@@ -436,7 +443,7 @@ class DownloadQueue:
                     "dest": dest,
                     "settings": json.loads(json.dumps(settings)),  # snapshot
                     "status": "queued",
-                    "title": None,
+                    "title": title,
                     "pct": 0,
                     "code": None,
                     "proc": None,
@@ -630,6 +637,26 @@ def format_selector(fmt):
     return f"{fmt['id']}+bestaudio/best" if fmt["kind"] == "video" else str(fmt["id"])
 
 
+def summarize_entries(entries):
+    """Playlist entries as the picker shows them, in playlist order. Each
+    becomes its own queue job when selected, so it needs a URL of its own;
+    entries without one (rare, extractor-specific) are skipped."""
+    out = []
+    for e in entries or []:
+        if not e:
+            continue
+        url = e.get("url") or e.get("webpage_url")
+        if not url:
+            continue
+        out.append({
+            "url": url,
+            "title": e.get("title") or url,
+            "duration": int(e["duration"]) if e.get("duration") else None,
+            "uploader": e.get("uploader") or e.get("channel") or "",
+        })
+    return out
+
+
 def summarize_info(data):
     """Trim yt-dlp -J output to what the preview card needs."""
     if data.get("_type") == "playlist":
@@ -639,9 +666,10 @@ def summarize_info(data):
             "title": data.get("title") or "",
             "uploader": data.get("uploader") or data.get("channel") or "",
             "count": data.get("playlist_count") or len(entries),
-            "thumbnail": data.get("thumbnail") or next((e.get("thumbnail") for e in entries if e.get("thumbnail")), None),
+            "thumbnail": data.get("thumbnail") or next((e.get("thumbnail") for e in entries if e and e.get("thumbnail")), None),
             "url": data.get("webpage_url") or data.get("original_url") or "",
             "formats": [],
+            "entries": summarize_entries(entries),
         }
     return {
         "kind": "video",
