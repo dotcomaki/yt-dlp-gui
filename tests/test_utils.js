@@ -3,7 +3,7 @@
 // Run with: node --test tests/test_utils.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getPath, setPath, deepMerge } = require('../ui/utils.js');
+const { getPath, setPath, deepMerge, settingsFingerprint } = require('../ui/utils.js');
 
 test('getPath reads a nested value', () => {
   const obj = { audio: { extractAudio: true } };
@@ -68,4 +68,25 @@ test('deepMerge handles a null or non-object source gracefully', () => {
   assert.deepEqual(deepMerge(target, null), { preset: 'best' });
   assert.deepEqual(deepMerge(target, undefined), { preset: 'best' });
   assert.deepEqual(deepMerge(target, 'not an object'), { preset: 'best' });
+});
+
+test('settingsFingerprint ignores key order, unknown keys and the password', () => {
+  const defaults = { preset: 'best', auth: { username: '', password: '' }, network: { parallel: '2' } };
+  const a = settingsFingerprint(defaults, { auth: { password: 'x', username: 'u' }, preset: '720p', bogus: 1 }, '/dl');
+  const b = settingsFingerprint(defaults, { preset: '720p', auth: { username: 'u', password: 'other' } }, '/dl');
+  assert.equal(a, b);
+});
+
+test('settingsFingerprint changes when a setting or the folder changes', () => {
+  const defaults = { preset: 'best', network: { parallel: '2' } };
+  const base = settingsFingerprint(defaults, { preset: '720p' }, '/dl');
+  assert.notEqual(base, settingsFingerprint(defaults, { preset: '480p' }, '/dl'));
+  assert.notEqual(base, settingsFingerprint(defaults, { preset: '720p' }, '/other'));
+  assert.equal(settingsFingerprint(defaults, {}, ''), settingsFingerprint(defaults, undefined, undefined));
+});
+
+test('settingsFingerprint does not mutate the defaults', () => {
+  const defaults = { preset: 'best', auth: { password: '' } };
+  settingsFingerprint(defaults, { preset: 'audio', auth: { password: 'p' } }, '');
+  assert.deepEqual(defaults, { preset: 'best', auth: { password: '' } });
 });

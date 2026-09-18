@@ -444,6 +444,18 @@
   }
   .queue-x:hover { color: var(--text); background: var(--bg-field); }
 
+  /* Profiles: dropdown applies a saved configuration; Save… opens an inline name field */
+  .profile-row { display: flex; gap: 8px; align-items: center; }
+  .profile-row select { flex: 1; }
+  .profile-name-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .profile-name-row input { flex: 1; }
+  .profile-hint { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
+
+  /* History tab: reuses the queue row look, plus per-row actions */
+  .history-row .queue-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .history-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .history-header-note { font-size: 11.5px; color: var(--text-dim); }
+
   /* Advanced tab: fixed sub-nav + independently scrolling content, so
      switching categories never changes the panel's height or stacks content. */
   #tab-advanced.panel { padding: 0; overflow: hidden; }
@@ -527,6 +539,7 @@
       <div class="nav-item active" data-tab="download"><span class="dot-icon"></span>Download</div>
       <div class="nav-item" data-tab="advanced"><span class="dot-icon"></span>Advanced</div>
       <div class="nav-item" data-tab="log"><span class="dot-icon"></span>Log</div>
+      <div class="nav-item" data-tab="history"><span class="dot-icon"></span>History</div>
       <div class="sidebar-spacer"></div>
       <div class="status-block">
         <div class="status-line status-line-clickable" id="ytdlpStatusLine" title="Click to check for updates"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
@@ -587,6 +600,20 @@
         <div class="field" id="customFormatField" style="display:none;">
           <label>Custom format string (-f)</label>
           <input type="text" id="customFormatInput" placeholder="e.g. bestvideo[ext=mp4]+bestaudio[ext=m4a]" />
+        </div>
+
+        <div class="field">
+          <label>Profile <span class="hint-inline">(a saved snapshot of every setting, including the Advanced tab and the folder)</span></label>
+          <div class="profile-row">
+            <select id="profileSelect"><option value="">No profile</option></select>
+            <button class="plain-btn" id="profileSaveBtn" title="Save the current settings as a named profile">Save…</button>
+            <button class="plain-btn" id="profileDeleteBtn" hidden>Delete</button>
+          </div>
+          <div class="profile-name-row" id="profileNameRow" hidden>
+            <input type="text" id="profileNameInput" placeholder="Profile name, e.g. Podcast" />
+            <button class="plain-btn" id="profileNameOk">Save</button>
+            <button class="plain-btn" id="profileNameCancel">Cancel</button>
+          </div>
         </div>
 
         <div class="field">
@@ -991,6 +1018,22 @@
         <h2>Log</h2>
         <div class="log" id="logBox"><span class="empty-log">Logs will appear here once a download starts…</span></div>
       </div>
+
+      <!-- History tab -->
+      <div class="panel" id="tab-history">
+        <h2>History</h2>
+        <div class="queue-section" style="margin-top: 0;">
+          <div class="queue-header">
+            <span class="history-header-note" id="historyNote"></span>
+            <div class="queue-actions">
+              <button class="small-btn" id="historyClearBtn" hidden>Clear history</button>
+            </div>
+          </div>
+          <div class="queue-list" id="historyList">
+            <div class="queue-empty">No downloads yet.</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1013,6 +1056,7 @@
     notifications: { enabled: true },
     extraArgs: '',
   };
+  const SETTINGS_DEFAULTS = JSON.parse(JSON.stringify(settings));   // pristine copy, for profile fingerprints
 
   // getPath/setPath/deepMerge now live in utils.js (shared with the test
   // suite via tests/test_utils.js) — loaded above as a plain <script>.
@@ -1021,8 +1065,9 @@
   function saveSettings() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      window.pywebview.api.save_settings({ settings, destFolder: folderInput.value });
+      window.pywebview.api.save_settings({ settings, destFolder: folderInput.value, profile: activeProfile });
     }, 400);
+    renderProfiles();   // "(modified)" marker tracks every change
   }
 
   function bindInputs() {
@@ -1103,6 +1148,7 @@
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.querySelector(`.sidebar > .nav-item[data-tab="${tabName}"]`).classList.add('active');
     document.getElementById('tab-' + tabName).classList.add('active');
+    if (tabName === 'history') refreshHistory();
   }
 
   document.querySelectorAll('.sidebar > .nav-item').forEach(item => {
@@ -1178,13 +1224,119 @@
       appendLog(`Settings import failed: ${result.error}`, 'err-line');
       return;
     }
-    deepMerge(settings, result.data.settings || {});
+    applyPayload(result.data);
+    activeProfile = '';
+    saveSettings();
+    appendLog('Settings imported.', 'ok-line');
+  });
+
+  // Overlay a saved {settings, destFolder} onto the live state and every
+  // input that shows it. The password is kept: it's never in a saved
+  // payload, and wiping what the user typed this session would be a surprise.
+  function applyPayload(payload) {
+    const password = settings.auth.password;
+    deepMerge(settings, payload.settings || {});
+    settings.auth.password = password;
     refreshAllBoundInputs();
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
-    if (result.data.destFolder) folderInput.value = result.data.destFolder;
+    if (payload.destFolder) folderInput.value = payload.destFolder;
+    window.pywebview.api.set_parallel(settings.network.parallel);
+  }
+
+  // --- Profiles ---------------------------------------------------------------
+  const profileSelect = document.getElementById('profileSelect');
+  const profileSaveBtn = document.getElementById('profileSaveBtn');
+  const profileDeleteBtn = document.getElementById('profileDeleteBtn');
+  const profileNameRow = document.getElementById('profileNameRow');
+  const profileNameInput = document.getElementById('profileNameInput');
+  let profiles = {};          // name -> {settings, destFolder}, mirrors profiles.json
+  let activeProfile = '';     // what the dropdown shows; '' = none
+  let deleteArmed = null;
+
+  function profileIsDirty() {
+    const p = profiles[activeProfile];
+    if (!p) return false;
+    return settingsFingerprint(SETTINGS_DEFAULTS, settings, folderInput.value)
+        !== settingsFingerprint(SETTINGS_DEFAULTS, p.settings, p.destFolder);
+  }
+
+  function renderProfiles() {
+    if (!(activeProfile in profiles)) activeProfile = '';
+    const dirty = profileIsDirty();
+    profileSelect.innerHTML = '';
+    profileSelect.appendChild(new Option('No profile', ''));
+    Object.keys(profiles).sort((a, b) => a.localeCompare(b)).forEach(name => {
+      profileSelect.appendChild(new Option(name === activeProfile && dirty ? `${name} (modified)` : name, name));
+    });
+    profileSelect.value = activeProfile;
+    profileDeleteBtn.hidden = !activeProfile;
+    if (deleteArmed !== activeProfile) disarmDelete();
+  }
+
+  function persistProfiles() {
+    return window.pywebview.api.save_profiles({ profiles });
+  }
+
+  profileSelect.addEventListener('change', () => {
+    const name = profileSelect.value;
+    if (name && profiles[name]) applyPayload(profiles[name]);
+    activeProfile = name;
     saveSettings();
-    appendLog('Settings imported.', 'ok-line');
+  });
+
+  profileSaveBtn.addEventListener('click', () => {
+    profileNameRow.hidden = false;
+    profileNameInput.value = activeProfile;
+    profileNameInput.focus();
+    profileNameInput.select();
+  });
+
+  function closeProfileName() {
+    profileNameRow.hidden = true;
+    profileNameInput.value = '';
+  }
+
+  async function saveProfileAs() {
+    const name = profileNameInput.value.trim();
+    if (!name) { profileNameInput.focus(); return; }
+    profiles[name] = { settings: JSON.parse(JSON.stringify(settings)), destFolder: folderInput.value };
+    activeProfile = name;
+    closeProfileName();
+    renderProfiles();
+    await persistProfiles();
+    saveSettings();
+  }
+
+  document.getElementById('profileNameOk').addEventListener('click', saveProfileAs);
+  document.getElementById('profileNameCancel').addEventListener('click', closeProfileName);
+  profileNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveProfileAs(); }
+    if (e.key === 'Escape') closeProfileName();
+  });
+
+  // Delete is two clicks: the first arms it for a few seconds.
+  let disarmTimer = null;
+  function disarmDelete() {
+    clearTimeout(disarmTimer);
+    deleteArmed = null;
+    profileDeleteBtn.textContent = 'Delete';
+  }
+  profileDeleteBtn.addEventListener('click', async () => {
+    if (!activeProfile) return;
+    if (deleteArmed !== activeProfile) {
+      deleteArmed = activeProfile;
+      profileDeleteBtn.textContent = 'Really delete?';
+      clearTimeout(disarmTimer);
+      disarmTimer = setTimeout(disarmDelete, 4000);
+      return;
+    }
+    delete profiles[activeProfile];
+    activeProfile = '';
+    disarmDelete();
+    renderProfiles();
+    await persistProfiles();
+    saveSettings();
   });
 
   // Download flow
@@ -1572,13 +1724,109 @@
       if (!picked.length) { appendLog('No playlist videos selected.', 'err-line'); return; }
       urls = picked.concat(urls.slice(1));
     }
+    urlInput.value = '';
+    clearTimeout(previewTimer); previewSeq++; hidePreview();
+    await startBatch(urls, settings, folderInput.value);
+  });
+
+  async function startBatch(items, batchSettings, dest) {
     // Fresh batch on an idle queue starts a fresh log; adding while things
     // run keeps the current job's output.
     if (!downloading) { logStarted = false; logBox.innerHTML = ''; }
-    urlInput.value = '';
-    clearTimeout(previewTimer); previewSeq++; hidePreview();
-    await window.pywebview.api.enqueue(urls, settings, folderInput.value);
+    await window.pywebview.api.enqueue(items, batchSettings, dest);
+  }
+
+  // --- History ------------------------------------------------------------------
+  const historyList = document.getElementById('historyList');
+  const historyNote = document.getElementById('historyNote');
+  const historyClearBtn = document.getElementById('historyClearBtn');
+
+  async function refreshHistory() {
+    let entries = [];
+    try { entries = await window.pywebview.api.history_list(); } catch (err) {}
+    renderHistory(entries);
+  }
+
+  function formatWhen(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso || '';
+    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  function historyRow(e) {
+    const row = document.createElement('div');
+    row.className = `queue-row history-row is-${e.status}`;
+    const main = document.createElement('div');
+    main.className = 'queue-main';
+    const name = document.createElement('div');
+    name.className = 'queue-name';
+    name.textContent = e.title || e.url;
+    name.title = e.url;
+    const meta = document.createElement('div');
+    meta.className = 'queue-meta';
+    const bits = [formatWhen(e.when), e.quality];
+    if ((e.files || []).length > 1) bits.push(`${e.files.length} files`);
+    bits.push(e.files && e.files.length ? e.files[0] : e.dest);
+    if (e.status === 'failed' && e.code != null) bits.push(`exit code ${e.code}`);
+    meta.textContent = bits.filter(Boolean).join(' · ');
+    meta.title = meta.textContent;
+    main.append(name, meta);
+
+    const status = document.createElement('span');
+    status.className = `queue-status s-${e.status}`;
+    status.textContent = STATUS_LABEL[e.status] || e.status;
+
+    const actions = document.createElement('div');
+    actions.className = 'history-actions';
+    const reveal = document.createElement('button');
+    reveal.className = 'small-btn';
+    reveal.textContent = 'Reveal';
+    reveal.title = 'Show in the file manager';
+    reveal.addEventListener('click', async () => {
+      const r = await window.pywebview.api.reveal((e.files && e.files[0]) || e.dest);
+      if (!r.ok) { reveal.textContent = r.error; setTimeout(() => { reveal.textContent = 'Reveal'; }, 2500); }
+    });
+    const again = document.createElement('button');
+    again.className = 'small-btn';
+    again.textContent = 'Again';
+    again.title = 'Download again with the same settings';
+    again.addEventListener('click', async () => {
+      await startBatch([{ url: e.url, title: e.title }], e.settings || settings, e.dest || folderInput.value);
+      switchTab('download');
+    });
+    const x = document.createElement('button');
+    x.className = 'queue-x';
+    x.textContent = '×';
+    x.title = 'Remove from history';
+    x.addEventListener('click', async () => {
+      await window.pywebview.api.history_remove(e.id);
+      refreshHistory();
+    });
+    actions.append(reveal, again);
+    row.append(main, status, actions, x);
+    return row;
+  }
+
+  function renderHistory(entries) {
+    historyList.innerHTML = '';
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'queue-empty';
+      empty.textContent = 'No downloads yet.';
+      historyList.appendChild(empty);
+    } else {
+      entries.forEach(e => historyList.appendChild(historyRow(e)));
+    }
+    historyNote.textContent = entries.length ? `${entries.length} download${entries.length === 1 ? '' : 's'}` : '';
+    historyClearBtn.hidden = !entries.length;
+  }
+
+  historyClearBtn.addEventListener('click', async () => {
+    await window.pywebview.api.history_clear();
+    refreshHistory();
   });
+
+  window.addEventListener('ytdlp-history', refreshHistory);
 
   cancelAllBtn.addEventListener('click', () => window.pywebview.api.cancel_all());
   clearFinishedBtn.addEventListener('click', () => window.pywebview.api.clear_finished());
@@ -1633,14 +1881,17 @@
       if (saved && saved.settings) {
         deepMerge(settings, saved.settings);
         savedDestFolder = saved.destFolder || null;
+        activeProfile = typeof saved.profile === 'string' ? saved.profile : '';
       }
     } catch (err) {}
+    try { profiles = (await window.pywebview.api.load_profiles()).profiles || {}; } catch (err) {}
 
     bindInputs();
     syncSponsorBlockUI();
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
     try { renderQueue(await window.pywebview.api.queue_snapshot()); } catch (err) {}
+    refreshHistory();
 
     const prefillUrl = new URLSearchParams(window.location.search).get('url');
     if (prefillUrl) {
@@ -1651,6 +1902,7 @@
     try {
       folderInput.value = savedDestFolder || await window.pywebview.api.default_folder();
     } catch (err) {}
+    renderProfiles();
 
     let ytdlpFound = false;
     try {

@@ -33,6 +33,16 @@ function deepMerge(target, source) {
   return target;
 }
 
+// A canonical string for "these settings + this folder" so the app can tell
+// whether the live state still matches the profile that was applied.
+// Normalizes through the defaults' shape (key order and unknown keys don't
+// matter) and blanks the password, which profiles never store anyway.
+function settingsFingerprint(defaults, settings, destFolder) {
+  const merged = deepMerge(JSON.parse(JSON.stringify(defaults)), settings || {});
+  if (merged.auth && typeof merged.auth === 'object') merged.auth.password = '';
+  return JSON.stringify({ settings: merged, destFolder: destFolder || '' });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { getPath, setPath, deepMerge };
+  module.exports = { getPath, setPath, deepMerge, settingsFingerprint };
 }

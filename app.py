@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import shlex
@@ -58,11 +59,23 @@ def find_ffmpeg():
     return _first_executable(FFMPEG_CANDIDATES)
 
 
-def settings_path():
+def config_path(name):
     config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     config_dir = os.path.join(config_home, "ytdlp-gui")
     os.makedirs(config_dir, exist_ok=True)
-    return os.path.join(config_dir, "settings.json")
+    return os.path.join(config_dir, name)
+
+
+def settings_path():
+    return config_path("settings.json")
+
+
+def profiles_path():
+    return config_path("profiles.json")
+
+
+def history_path():
+    return config_path("history.json")
 
 
 YTDLP_RELEASES_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
@@ -446,6 +459,7 @@ class DownloadQueue:
                     "title": title,
                     "pct": 0,
                     "code": None,
+                    "files": [],       # final output paths, from --print after_move
                     "proc": None,
                     "cancel": False,
                     "reported": False,
@@ -506,6 +520,15 @@ class DownloadQueue:
     def is_active(self):
         with self._lock:
             return any(j["status"] in ("queued", "running") for j in self._jobs)
+
+    def get(self, job_id):
+        """A copy of one job's full record (settings, files, ...) — what the
+        history needs once it's finished. None if it's been removed."""
+        with self._lock:
+            job = self._find(job_id)
+            if job is None:
+                return None
+            return {k: v for k, v in job.items() if k != "proc"}
 
     def unreported_finished(self):
         """Terminal jobs nobody has reported on yet (marks them reported).
@@ -727,6 +750,16 @@ def summarize_finished(jobs):
     return ", ".join(parts)
 
 
+# yt-dlp tells us where each finished file ended up (after merging, audio
+# extraction, and every other postprocessor) via --print after_move — the
+# only reliable source, since the "[download] Destination:" lines name the
+# intermediate streams. --print implies --quiet, which would also silence
+# the progress lines the UI parses, so --no-quiet turns them back on. The
+# marker keeps the printed path out of the log stream.
+FILE_MARKER = "\x1e__ytdlpgui_file__\x1e"
+FILE_PRINT_ARGS = ["--no-quiet", "--print", f"after_move:{FILE_MARKER}%(filepath)s"]
+
+
 def run_download_job(job, emit):
     """Runs one queued job with yt-dlp, streaming log/progress events.
     Returns the process exit code (-1 if it couldn't start)."""
@@ -742,10 +775,13 @@ def run_download_job(job, emit):
         emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: invalid settings: {e}"})
         return -1
 
+    # The log shows the command as the user's settings produced it; the
+    # --print plumbing that feeds the history is spliced in only for the run.
     emit("ytdlp-log", {"jobId": job["id"], "line": f"$ {' '.join(shlex.quote(a) for a in args)}"})
     try:
         proc = subprocess.Popen(
-            args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            args[:-1] + FILE_PRINT_ARGS + args[-1:],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         )
     except Exception as e:
         emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: {e}"})
@@ -757,6 +793,9 @@ def run_download_job(job, emit):
     for line in proc.stdout:
         line = line.rstrip("\n")
         if not line:
+            continue
+        if line.startswith(FILE_MARKER):
+            job["files"].append(line[len(FILE_MARKER):])
             continue
         emit("ytdlp-log", {"jobId": job["id"], "line": line})
         title = title_from_log_line(line)
@@ -776,11 +815,98 @@ def run_download_job(job, emit):
     return proc.wait()
 
 
+# --- history ---------------------------------------------------------------------
+
+HISTORY_CAP = 500   # newest kept; oldest dropped past this
+
+
+def quality_label(settings):
+    """What the History row shows for 'how it was downloaded'."""
+    preset = settings.get("preset", "best")
+    if preset == "custom":
+        return (settings.get("format") or {}).get("customFormat") or "custom"
+    if preset == "audio":
+        fmt = (settings.get("audio") or {}).get("audioFormat") or ""
+        return f"audio ({fmt})" if fmt and (settings.get("audio") or {}).get("extractAudio") else "audio"
+    return preset
+
+
+def history_entry(job, now=None):
+    """A history record for a finished (done or failed) job. Carries the
+    settings snapshot so 'Download again' reproduces it exactly — minus
+    the password, same rule as settings.json."""
+    settings = sanitize_settings_payload({"settings": job["settings"]})["settings"]
+    when = (now or datetime.datetime.now()).astimezone()
+    return {
+        "id": f"{int(when.timestamp() * 1000)}-{job['id']}",
+        "url": job["url"],
+        "title": job.get("title"),
+        "dest": job["dest"],
+        "files": list(job.get("files") or []),
+        "status": job["status"],
+        "code": job.get("code"),
+        "when": when.isoformat(timespec="seconds"),
+        "quality": quality_label(settings),
+        "settings": settings,
+    }
+
+
+def load_history():
+    try:
+        with open(history_path()) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    entries = data.get("entries") if isinstance(data, dict) else None
+    return [e for e in (entries or []) if isinstance(e, dict)]
+
+
+def write_history(entries):
+    with open(history_path(), "w") as f:
+        json.dump({"entries": entries[-HISTORY_CAP:]}, f, indent=2)
+
+
+def reveal_command(path):
+    """argv that shows `path` to the user: the file selected in Finder on
+    macOS; on Linux, the containing folder (no portable 'select' verb).
+    A file that's since been moved or deleted falls back to its folder."""
+    target = path
+    if not os.path.exists(target):
+        target = os.path.dirname(path)
+        if not os.path.isdir(target):
+            return None
+    if sys.platform == "darwin":
+        return ["open", "-R", target] if os.path.isfile(target) else ["open", target]
+    opener = shutil.which("xdg-open")
+    if not opener:
+        return None
+    return [opener, target if os.path.isdir(target) else os.path.dirname(target)]
+
+
+# --- profiles --------------------------------------------------------------------
+
+def sanitize_profiles(data):
+    """{"profiles": {name: payload}} with every payload run through the same
+    password exclusion as settings.json, and anything malformed dropped."""
+    profiles = data.get("profiles") if isinstance(data, dict) else None
+    if not isinstance(profiles, dict):
+        profiles = {}
+    out = {}
+    for name, payload in profiles.items():
+        name = str(name).strip()
+        if not name or not isinstance(payload, dict) or not isinstance(payload.get("settings"), dict):
+            continue
+        clean = sanitize_settings_payload(payload)
+        out[name] = {"settings": clean["settings"], "destFolder": clean.get("destFolder") or ""}
+    return {"profiles": out}
+
+
 class Api:
     def __init__(self):
         self.window = None
         self.queue = DownloadQueue(self._emit, run_download_job)
         self.notifier = send_notification
+        self._history_lock = threading.Lock()   # parallel jobs can finish together
 
     def set_window(self, window):
         self.window = window
@@ -845,6 +971,65 @@ class Api:
             return {"ok": True, "data": data}
         except (OSError, json.JSONDecodeError) as e:
             return {"ok": False, "error": str(e)}
+
+    # --- profiles ---
+
+    def load_profiles(self):
+        try:
+            with open(profiles_path()) as f:
+                return sanitize_profiles(json.load(f))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"profiles": {}}
+
+    def save_profiles(self, data):
+        data = sanitize_profiles(data)
+        try:
+            with open(profiles_path(), "w") as f:
+                json.dump(data, f, indent=2)
+            return True
+        except Exception:
+            return False
+
+    # --- history ---
+
+    def history_list(self):
+        with self._history_lock:
+            return list(reversed(load_history()))   # newest first
+
+    def history_remove(self, entry_id):
+        with self._history_lock:
+            entries = [e for e in load_history() if e.get("id") != entry_id]
+            write_history(entries)
+        return True
+
+    def history_clear(self):
+        with self._history_lock:
+            write_history([])
+        return True
+
+    def reveal(self, path):
+        cmd = reveal_command(path)
+        if not cmd:
+            return {"ok": False, "error": "File and folder no longer exist"}
+        try:
+            subprocess.Popen(cmd)
+            return {"ok": True}
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+
+    def _record_history(self, job_id):
+        """True once the job is on disk in history.json."""
+        job = self.queue.get(job_id)
+        if not job or job["status"] not in ("done", "failed"):
+            return False   # cancelled by the user: nothing worth remembering
+        try:
+            with self._history_lock:
+                entries = load_history()
+                entries.append(history_entry(job))
+                write_history(entries)
+            return True
+        except Exception:
+            return False   # a read-only config dir must not take the queue down (worker thread)
 
     def check_binary(self):
         path = find_ytdlp()
@@ -983,6 +1168,8 @@ class Api:
             self.window.evaluate_js(js)
         if event == "ytdlp-done":
             self._notify_if_drained()
+            if self._record_history(payload["jobId"]):
+                self._emit("ytdlp-history", {"jobId": payload["jobId"]})
 
     def _notify_if_drained(self):
         # ytdlp-done fires with the finished job already terminal and any
