@@ -420,3 +420,28 @@ def test_unparseable_rate_limit_passes_through_for_ytdlp_to_reject():
 def test_parallel_from_settings(value, expected):
     assert app.parallel_from_settings({"network": {"parallel": value}}) == expected
     assert app.parallel_from_settings({}) == 1
+
+
+# --- speed / throttling knobs (#20) ---------------------------------------------------
+
+def test_concurrent_fragments_and_throttled_rate():
+    args = app.build_args("yt-dlp", {"network": {"concurrentFragments": "8", "throttledRate": " 100K "}}, "/tmp")
+    assert flag_value(args, "-N") == "8" and flag_value(args, "--throttled-rate") == "100K"
+    args = app.build_args("yt-dlp", {"network": {"concurrentFragments": ""}}, "/tmp")
+    assert "-N" not in args and "--throttled-rate" not in args
+
+
+def test_sleep_and_fragment_retries():
+    args = app.build_args("yt-dlp", {"network": {"sleepInterval": "2", "maxSleepInterval": "5", "sleepRequests": "0.5", "fragmentRetries": "infinite"}}, "/tmp")
+    assert flag_value(args, "--sleep-interval") == "2" and flag_value(args, "--max-sleep-interval") == "5"
+    assert flag_value(args, "--sleep-requests") == "0.5" and flag_value(args, "--fragment-retries") == "infinite"
+    # max without min is meaningless to yt-dlp
+    args = app.build_args("yt-dlp", {"network": {"maxSleepInterval": "5"}}, "/tmp")
+    assert "--max-sleep-interval" not in args
+
+
+def test_rate_limit_splits_across_jobs_actually_sharing_it():
+    settings = {"network": {"rateLimit": "1M", "parallel": "4"}}
+    assert flag_value(app.build_args("yt-dlp", settings, "/tmp", slots=1), "--limit-rate") == "1M"   # alone: as typed
+    assert flag_value(app.build_args("yt-dlp", settings, "/tmp", slots=2), "--limit-rate") == str(1024 ** 2 // 2)
+    assert flag_value(app.build_args("yt-dlp", settings, "/tmp"), "--limit-rate") == str(1024 ** 2 // 4)   # no queue info: the setting

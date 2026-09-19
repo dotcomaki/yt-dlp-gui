@@ -387,9 +387,11 @@ def section_args(section, dest):
     return ["--download-sections", f"*{_num(start)}-{_num(end) if end is not None else 'inf'}"]
 
 
-def build_args(binary, settings, dest, section=None):
+def build_args(binary, settings, dest, section=None, slots=None):
     """Translate the settings dict from the UI into a yt-dlp argv list.
-    `section` restricts the download to part of the video (see above)."""
+    `section` restricts the download to part of the video (see above);
+    `slots` is how many jobs will actually share the rate limit (the queue
+    knows; defaults to the parallel setting)."""
     preset = settings.get("preset", "best")
     fmt = settings.get("format", {})
     filename = settings.get("filename", {})
@@ -507,11 +509,23 @@ def build_args(binary, settings, dest, section=None):
     if net.get("proxy"):
         args += ["--proxy", net["proxy"]]
     if net.get("rateLimit"):
-        # The setting is the total; split it across parallel download slots.
-        parallel = parallel_from_settings(settings)
+        # The setting is the total; split it across the jobs sharing it.
+        parallel = slots or parallel_from_settings(settings)
         args += ["--limit-rate", per_process_rate_limit(net["rateLimit"], parallel)]
+    if net.get("throttledRate"):
+        args += ["--throttled-rate", str(net["throttledRate"]).strip()]
+    if net.get("concurrentFragments"):
+        args += ["-N", str(net["concurrentFragments"]).strip()]
     if net.get("retries"):
         args += ["--retries", str(net["retries"])]
+    if net.get("fragmentRetries"):
+        args += ["--fragment-retries", str(net["fragmentRetries"]).strip()]
+    if net.get("sleepInterval"):
+        args += ["--sleep-interval", str(net["sleepInterval"]).strip()]
+        if net.get("maxSleepInterval"):
+            args += ["--max-sleep-interval", str(net["maxSleepInterval"]).strip()]
+    if net.get("sleepRequests"):
+        args += ["--sleep-requests", str(net["sleepRequests"]).strip()]
     if net.get("socketTimeout"):
         args += ["--socket-timeout", str(net["socketTimeout"])]
     if net.get("forceIpv4"):
@@ -766,11 +780,15 @@ class DownloadQueue:
         to_start = []
         with self._lock:
             running = sum(1 for j in self._jobs if j["status"] == "running")
+            active = running + sum(1 for j in self._jobs if j["status"] == "queued")
             for job in self._jobs:
                 if running >= self._max_concurrent:
                     break
                 if job["status"] == "queued":
                     job["status"] = "running"
+                    # How many jobs the rate limit is really shared with: a
+                    # lone job with four slots configured gets the whole limit.
+                    job["slots"] = max(1, min(self._max_concurrent, active))
                     running += 1
                     to_start.append(job)
         for job in to_start:
@@ -1078,7 +1096,7 @@ def run_download_job(job, emit):
 
     os.makedirs(job["dest"], exist_ok=True)
     try:
-        args = build_args(binary, job["settings"], job["dest"], job.get("section")) + [job["url"]]
+        args = build_args(binary, job["settings"], job["dest"], job.get("section"), job.get("slots")) + [job["url"]]
     except Exception as e:
         emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: invalid settings: {e}"})
         return -1

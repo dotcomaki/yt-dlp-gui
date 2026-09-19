@@ -900,14 +900,25 @@
               <h3>Network</h3>
               <div class="field-row">
                 <div class="field">
-                  <label>Parallel downloads</label>
+                  <label>Simultaneous downloads</label>
                   <select data-bind="network.parallel">
                     <option value="1">1 (one at a time)</option>
                     <option value="2">2</option>
                     <option value="3">3</option>
                     <option value="4">4</option>
                   </select>
-                  <div class="hint">Applies to the queue immediately. The rate limit below is the <em>total</em> — it's split evenly across parallel slots.</div>
+                  <div class="hint">How many queue items run at once — separate yt-dlp processes. Applies immediately. The rate limit below is the <em>total</em>, split across the downloads actually running.</div>
+                </div>
+                <div class="field">
+                  <label>Concurrent fragments <span class="hint-inline">(-N)</span></label>
+                  <select data-bind="network.concurrentFragments">
+                    <option value="">1 (yt-dlp default)</option>
+                    <option value="2">2</option>
+                    <option value="4">4</option>
+                    <option value="8">8</option>
+                    <option value="16">16</option>
+                  </select>
+                  <div class="hint">Pieces of <em>one</em> video fetched in parallel. The big speed-up for YouTube (DASH/HLS); 4–8 is typical.</div>
                 </div>
               </div>
               <div class="field-row">
@@ -922,12 +933,37 @@
               </div>
               <div class="field-row">
                 <div class="field">
-                  <label>Retries</label>
-                  <input type="text" data-bind="network.retries" placeholder="10" />
+                  <label>Throttled rate</label>
+                  <input type="text" data-bind="network.throttledRate" placeholder="e.g. 100K" />
+                  <div class="hint">If YouTube slows a download below this, yt-dlp re-extracts and tries again.</div>
                 </div>
                 <div class="field">
                   <label>Socket timeout (s)</label>
                   <input type="text" data-bind="network.socketTimeout" placeholder="20" />
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Retries</label>
+                  <input type="text" data-bind="network.retries" placeholder="10" />
+                </div>
+                <div class="field">
+                  <label>Fragment retries</label>
+                  <input type="text" data-bind="network.fragmentRetries" placeholder="10, or infinite" />
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Sleep between downloads (s) <span class="hint-inline">(min – max)</span></label>
+                  <div class="folder-row">
+                    <input type="text" data-bind="network.sleepInterval" placeholder="0" />
+                    <input type="text" data-bind="network.maxSleepInterval" placeholder="same as min" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Sleep between requests (s)</label>
+                  <input type="text" data-bind="network.sleepRequests" placeholder="0" />
+                  <div class="hint">Politeness for bulk runs — a random pause per download, and a pause before each metadata request.</div>
                 </div>
               </div>
               <div class="checkbox-row">
@@ -1146,7 +1182,8 @@
     subtitles: { write: false, writeAuto: false, langs: 'en', embed: false },
     thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false },
     audio: { extractAudio: false, audioFormat: 'mp3', audioQuality: '', keepVideo: false },
-    network: { proxy: '', rateLimit: '', retries: '', socketTimeout: '', forceIpv4: false, forceIpv6: false, parallel: '2' },
+    network: { proxy: '', rateLimit: '', retries: '', socketTimeout: '', forceIpv4: false, forceIpv6: false, parallel: '2',
+               concurrentFragments: '', throttledRate: '', fragmentRetries: '', sleepInterval: '', maxSleepInterval: '', sleepRequests: '' },
     auth: { username: '', password: '', cookiesFile: '', cookiesFromBrowser: 'none' },
     sponsorblock: { mark: false, remove: false, categories: 'all' },
     geo: { disable: false, bypassCountry: '' },

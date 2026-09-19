@@ -480,3 +480,18 @@ def test_api_enqueue_applies_parallel_setting():
     assert runner.peak == 2
     assert api.set_parallel(1) is True
     assert api.queue._max_concurrent == 1
+
+
+def test_dispatch_records_how_many_jobs_share_the_rate_limit():
+    seen = {}
+
+    def runner(job, emit):
+        seen[job["url"]] = job["slots"]
+        time.sleep(0.05)
+        return 0
+    q = app.DownloadQueue(Emit(), runner, max_concurrent=4)
+    q.enqueue(["https://a"], {}, "/dl")             # alone: the whole limit
+    assert idle(q)
+    q.enqueue(["https://b", "https://c"], {}, "/dl")   # two share it, even with four slots configured
+    assert idle(q)
+    assert seen == {"https://a": 1, "https://b": 2, "https://c": 2}
