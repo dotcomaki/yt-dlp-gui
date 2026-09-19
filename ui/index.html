@@ -370,6 +370,25 @@
   .preview-entry .dur { color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .preview-entry.is-off .name { color: var(--text-dim); }
 
+  /* Clip: a time range under the card; chapters reuse the checklist look */
+  .preview-clip {
+    margin-top: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
+  .preview-clip input[type="text"] { width: 76px; padding: 4px 7px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .preview-clip label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .preview-clip .spacer { flex: 1; }
+  .preview-entries-head label.split { margin-left: 4px; }
+
   /* Download queue */
   .queue-section { margin-top: 18px; }
   .queue-header {
@@ -616,6 +635,23 @@
               <span class="count" id="previewEntriesCount"></span>
             </div>
             <div class="preview-entries-list" id="previewEntriesList"></div>
+          </div>
+          <div class="preview-clip" id="previewClip" hidden>
+            <span>Clip</span>
+            <input type="text" id="clipStart" placeholder="0:00" title="Start — 1:23, 1:23:45, or seconds; empty = from the beginning" />
+            <span>to</span>
+            <input type="text" id="clipEnd" placeholder="end" title="End — empty = to the end" />
+            <label title="Re-encodes around the cut points so the clip starts exactly where you asked instead of at the previous keyframe. Slower."><input type="checkbox" data-bind="format.forceKeyframesAtCuts" /> exact cuts</label>
+            <span class="spacer"></span>
+            <span class="hint-inline">Leave both empty for the whole video</span>
+          </div>
+          <div class="preview-entries" id="previewChapters" hidden>
+            <div class="preview-entries-head">
+              <label><input type="checkbox" id="previewChaptersAll" /> All chapters</label>
+              <label class="split" title="One download, then ffmpeg cuts it into a file per chapter — faster than downloading each chapter separately, and keeps the full video too"><input type="checkbox" id="previewChaptersSplit" /> split into one file per chapter</label>
+              <span class="count" id="previewChaptersCount"></span>
+            </div>
+            <div class="preview-entries-list" id="previewChaptersList"></div>
           </div>
         </div>
 
@@ -1088,7 +1124,7 @@
 <script>
   const settings = {
     preset: 'best',
-    format: { customFormat: '', mergeOutputFormat: 'mp4', recodeVideo: 'none', preferFreeFormats: false },
+    format: { customFormat: '', mergeOutputFormat: 'mp4', recodeVideo: 'none', preferFreeFormats: false, forceKeyframesAtCuts: false },
     filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false },
     playlist: { items: '', noPlaylist: false, maxDownloads: '' },
     subtitles: { write: false, writeAuto: false, langs: 'en', embed: false },
@@ -1701,6 +1737,17 @@
   let previewFormatRows = [];
   let previewEntryRows = [];   // playlist entries, in playlist order
   let openFormatsOnPreview = null;   // URL whose Formats table should open as soon as its preview renders
+  const previewClip = document.getElementById('previewClip');
+  const clipStart = document.getElementById('clipStart');
+  const clipEnd = document.getElementById('clipEnd');
+  const previewChapters = document.getElementById('previewChapters');
+  const previewChaptersAll = document.getElementById('previewChaptersAll');
+  const previewChaptersSplit = document.getElementById('previewChaptersSplit');
+  const previewChaptersCount = document.getElementById('previewChaptersCount');
+  const previewChaptersList = document.getElementById('previewChaptersList');
+  let previewChapterRows = [];       // the video's chapters, in order
+  let previewChapterPicked = new Set();   // none by default — the whole video is the normal case
+  let previewDuration = null;
   let previewPicked = new Set();   // indices into previewEntryRows the user has ticked
 
   function looksLikeUrl(s) {
@@ -1713,10 +1760,22 @@
     return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + ':' + String(s).padStart(2, '0');
   }
 
+  function resetSections() {
+    previewChapterRows = [];
+    previewChapterPicked = new Set();
+    previewDuration = null;
+    clipStart.value = '';
+    clipEnd.value = '';
+    previewChaptersSplit.checked = false;
+    previewClip.hidden = true;
+    previewChapters.hidden = true;
+  }
+
   function hidePreview() {
     previewUrl = null;
     previewEntryRows = [];
     previewPicked = new Set();
+    resetSections();
     preview.hidden = true;
     previewCard.hidden = true;
     previewStatus.hidden = true;
@@ -1727,6 +1786,7 @@
   function showPreviewStatus(text, isError) {
     previewEntryRows = [];
     previewPicked = new Set();
+    resetSections();
     preview.hidden = false;
     previewCard.hidden = true;
     previewFormats.hidden = true;
@@ -1762,6 +1822,13 @@
     previewEntryRows = info.kind === 'playlist' ? (info.entries || []) : [];
     previewPicked = new Set(previewEntryRows.map((_, i) => i));   // everything on, as a plain playlist download would be
     renderEntryRows();
+    resetSections();
+    if (info.kind !== 'playlist') {
+      previewDuration = info.duration;
+      previewClip.hidden = false;
+      previewChapterRows = info.chapters || [];
+      renderChapterRows();
+    }
     if (openFormatsOnPreview && openFormatsOnPreview === previewUrl && previewFormatRows.length) {
       previewFormats.hidden = false;
     }
@@ -1812,6 +1879,83 @@
   function pickedEntries(firstUrl) {
     if (!previewEntryRows.length || firstUrl !== previewUrl) return null;
     return previewEntryRows.filter((_, i) => previewPicked.has(i)).map(e => ({ url: e.url, title: e.title }));
+  }
+
+  // --- Chapters and clips ------------------------------------------------------
+  function renderChapterRows() {
+    previewChaptersList.innerHTML = '';
+    previewChapters.hidden = previewChapterRows.length === 0;
+    previewChapterRows.forEach((c, i) => {
+      const row = document.createElement('label');
+      row.className = 'preview-entry';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = previewChapterPicked.has(i);
+      cb.disabled = previewChaptersSplit.checked;
+      cb.addEventListener('change', () => {
+        if (cb.checked) previewChapterPicked.add(i); else previewChapterPicked.delete(i);
+        row.classList.toggle('is-off', !cb.checked);
+        updateChaptersHead();
+      });
+      const idx = document.createElement('span'); idx.className = 'idx'; idx.textContent = String(i + 1);
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = c.title; name.title = c.title;
+      const dur = document.createElement('span'); dur.className = 'dur';
+      dur.textContent = `${formatDuration(Math.floor(c.start))} – ${formatDuration(Math.floor(c.end))}`;
+      row.append(cb, idx, name, dur);
+      row.classList.toggle('is-off', !cb.checked);
+      previewChaptersList.appendChild(row);
+    });
+    updateChaptersHead();
+  }
+
+  function updateChaptersHead() {
+    const n = previewChapterPicked.size, total = previewChapterRows.length;
+    previewChaptersCount.textContent = previewChaptersSplit.checked ? `all ${total}, as separate files` : (n ? `${n} of ${total} selected` : `${total} chapters`);
+    previewChaptersAll.checked = n === total && total > 0;
+    previewChaptersAll.indeterminate = n > 0 && n < total;
+    previewChaptersAll.disabled = previewChaptersSplit.checked;
+  }
+
+  previewChaptersAll.addEventListener('change', () => {
+    previewChapterPicked = previewChaptersAll.checked ? new Set(previewChapterRows.map((_, i) => i)) : new Set();
+    renderChapterRows();
+  });
+  previewChaptersSplit.addEventListener('change', renderChapterRows);
+
+  // "1:23:45", "1:23", "83", "1m23s", "1h2m" -> seconds; null if empty; NaN if garbage
+  function parseTimestamp(text) {
+    const t = (text || '').trim().toLowerCase();
+    if (!t) return null;
+    let m = t.match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/);
+    if (m) return (+(m[1] || 0)) * 3600 + (+m[2]) * 60 + (+m[3]);
+    m = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s?)?$/);
+    if (m && (m[1] || m[2] || m[3])) return (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0));
+    return NaN;
+  }
+
+  // What the first line becomes when the card shows a single video and the
+  // user asked for part of it: one job per ticked chapter, one split job,
+  // or one clip job. null = nothing asked, download the whole thing.
+  // A string is a validation error to show.
+  function sectionItems(firstUrl) {
+    if (firstUrl !== previewUrl || previewClip.hidden) return null;
+    const title = previewTitle.textContent;
+    if (previewChaptersSplit.checked) {
+      return [{ url: firstUrl, title: `${title} — all chapters, split`, section: { splitChapters: true } }];
+    }
+    if (previewChapterPicked.size) {
+      return previewChapterRows.filter((_, i) => previewChapterPicked.has(i))
+        .map(c => ({ url: firstUrl, title: `${title} — ${c.title}`, section: { start: c.start, end: c.end, title: c.title } }));
+    }
+    const start = parseTimestamp(clipStart.value), end = parseTimestamp(clipEnd.value);
+    if (start === null && end === null) return null;
+    if (Number.isNaN(start) || Number.isNaN(end)) return 'Clip times look like 1:23, 1:23:45, or seconds.';
+    if (end !== null && start !== null && end <= start) return 'The clip has to end after it starts.';
+    if (previewDuration != null && ((start || 0) >= previewDuration || (end !== null && end > previewDuration))) {
+      return `This video is ${formatDuration(previewDuration)} long.`;
+    }
+    const label = `${formatDuration(Math.floor(start || 0))}–${end !== null ? formatDuration(Math.floor(end)) : 'end'}`;
+    return [{ url: firstUrl, title: `${title} [${label}]`, section: { start: start || 0, end: end } }];
   }
 
   function formatSelector(f) {
@@ -1877,6 +2021,9 @@
       if (!picked.length) { showDownloadError('No playlist videos selected.'); return; }
       urls = picked.concat(urls.slice(1));
     }
+    const sections = sectionItems(urls[0]);
+    if (typeof sections === 'string') { showDownloadError(sections); return; }
+    if (sections) urls = sections.concat(urls.slice(1));
     showDownloadError(null);
     urlInput.value = '';
     clearTimeout(previewTimer); previewSeq++; hidePreview();
@@ -1957,7 +2104,7 @@
     again.textContent = 'Again';
     again.title = 'Download again with the same settings';
     again.addEventListener('click', async () => {
-      await startBatch([{ url: e.url, title: e.title }], e.settings || settings, e.dest || folderInput.value);
+      await startBatch([{ url: e.url, title: e.title, section: e.section || null }], e.settings || settings, e.dest || folderInput.value);
       switchTab('download');
     });
     const x = document.createElement('button');

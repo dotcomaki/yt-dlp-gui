@@ -106,7 +106,7 @@ def test_every_mutation_emits_a_queue_snapshot():
     # snapshots only expose public fields, never the Popen or settings blob
     for snap in emit.of("ytdlp-queue"):
         for job in snap["jobs"]:
-            assert set(job) == {"id", "url", "status", "title", "pct", "code", "hint"}
+            assert set(job) == {"id", "url", "status", "title", "pct", "code", "hint", "section"}
 
 
 # --- sequential processing -------------------------------------------------------

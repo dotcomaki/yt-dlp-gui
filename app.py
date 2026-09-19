@@ -328,8 +328,68 @@ def redact_args(args):
     return out
 
 
-def build_args(binary, settings, dest):
-    """Translate the settings dict from the UI into a yt-dlp argv list."""
+# --- sections (clips and chapters) -------------------------------------------------
+# A job may download part of a video: {"start", "end", "title"} (end None =
+# to the end; title set when it came from a chapter) or {"splitChapters":
+# True}. yt-dlp's --download-sections takes "*START-END"; every section
+# then goes through the same output template, so two sections of one
+# video would overwrite each other unless the name carries the section.
+
+def format_seconds(sec):
+    """1m30s / 1h02m03s / 45s — filename-safe, no colons."""
+    sec = int(round(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m{s:02d}s"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
+
+def _num(sec):
+    return str(int(sec)) if float(sec).is_integer() else f"{sec:.3f}".rstrip("0")
+
+
+def section_label(section):
+    if section.get("title"):
+        return section["title"]
+    end = section.get("end")
+    return f"{format_seconds(section.get('start') or 0)}-{format_seconds(end) if end is not None else 'end'}"
+
+
+FILENAME_UNSAFE_RE = re.compile(r"[\\/\x00-\x1f]+")
+
+
+def template_with_suffix(template, suffix):
+    """Insert ` - suffix` before the extension of an output template, so a
+    section's file doesn't collide with the whole video's. The suffix is
+    literal text inside a template: %% escapes it, path separators go."""
+    safe = FILENAME_UNSAFE_RE.sub(" ", suffix).replace("%", "%%").strip()
+    safe = " ".join(safe.split())[:80]
+    tail = ".%(ext)s"
+    if template.endswith(tail):
+        return f"{template[:-len(tail)]} - {safe}{tail}"
+    return f"{template} - {safe}"
+
+
+# yt-dlp's default name for split chapter files; it resolves that template
+# against the *current directory* when the main -o is absolute (as ours
+# is), so it has to be pointed at the destination explicitly.
+CHAPTER_TEMPLATE = "%(title)s - %(section_number)03d %(section_title)s [%(id)s].%(ext)s"
+
+
+def section_args(section, dest):
+    if section.get("splitChapters"):
+        return ["--split-chapters", "-o", "chapter:" + os.path.join(dest, CHAPTER_TEMPLATE)]
+    start = section.get("start") or 0
+    end = section.get("end")
+    return ["--download-sections", f"*{_num(start)}-{_num(end) if end is not None else 'inf'}"]
+
+
+def build_args(binary, settings, dest, section=None):
+    """Translate the settings dict from the UI into a yt-dlp argv list.
+    `section` restricts the download to part of the video (see above)."""
     preset = settings.get("preset", "best")
     fmt = settings.get("format", {})
     filename = settings.get("filename", {})
@@ -368,7 +428,13 @@ def build_args(binary, settings, dest):
 
     # --- filename / output template ---
     template = (filename.get("template") or "%(title)s.%(ext)s").strip()
+    if section and not section.get("splitChapters"):
+        template = template_with_suffix(template, section_label(section))
     args += ["-o", os.path.join(dest, template)]
+    if section:
+        args += section_args(section, dest)
+        if fmt.get("forceKeyframesAtCuts"):
+            args.append("--force-keyframes-at-cuts")
     if filename.get("restrict"):
         args.append("--restrict-filenames")
     if filename.get("noOverwrites"):
@@ -557,9 +623,10 @@ class DownloadQueue:
         ids = []
         with self._lock:
             for item in urls:
-                title = None
+                title = section = None
                 if isinstance(item, dict):
                     title = (item.get("title") or "").strip() or None
+                    section = item.get("section") if isinstance(item.get("section"), dict) else None
                     item = item.get("url")
                 url = (item or "").strip()
                 if not url:
@@ -576,6 +643,7 @@ class DownloadQueue:
                     "files": [],       # final output paths, from --print after_move
                     "tail": [],        # last TAIL_LINES of output, for error_hint on failure
                     "hint": None,
+                    "section": section,
                     "proc": None,
                     "cancel": False,
                     "reported": False,
@@ -662,7 +730,7 @@ class DownloadQueue:
         return next((j for j in self._jobs if j["id"] == job_id), None)
 
     def _public(self, job):
-        return {k: job[k] for k in ("id", "url", "status", "title", "pct", "code", "hint")}
+        return {k: job[k] for k in ("id", "url", "status", "title", "pct", "code", "hint", "section")}
 
     def retry(self, job_id):
         """A fresh job with the same url/title/settings/dest as a finished
@@ -672,7 +740,7 @@ class DownloadQueue:
             job = self._find(job_id)
             if not job or job["status"] not in TERMINAL_STATUSES:
                 return None
-            item = {"url": job["url"], "title": job["title"]}
+            item = {"url": job["url"], "title": job["title"], "section": job.get("section")}
             settings, dest = job["settings"], job["dest"]
         ids = self.enqueue([item], settings, dest)
         return ids[0] if ids else None
@@ -832,7 +900,18 @@ def summarize_info(data):
         "thumbnail": data.get("thumbnail"),
         "url": data.get("webpage_url") or data.get("original_url") or "",
         "formats": summarize_formats(data.get("formats")),
+        "chapters": summarize_chapters(data.get("chapters")),
     }
+
+
+def summarize_chapters(chapters):
+    out = []
+    for c in chapters or []:
+        if not isinstance(c, dict) or c.get("start_time") is None or c.get("end_time") is None:
+            continue
+        out.append({"title": c.get("title") or f"Chapter {len(out) + 1}",
+                    "start": c["start_time"], "end": c["end_time"]})
+    return out
 
 
 def notify_command(title, message):
@@ -960,7 +1039,7 @@ def run_download_job(job, emit):
 
     os.makedirs(job["dest"], exist_ok=True)
     try:
-        args = build_args(binary, job["settings"], job["dest"]) + [job["url"]]
+        args = build_args(binary, job["settings"], job["dest"], job.get("section")) + [job["url"]]
     except Exception as e:
         emit("ytdlp-log", {"jobId": job["id"], "line": f"Error: invalid settings: {e}"})
         return -1
@@ -1040,6 +1119,7 @@ def history_entry(job, now=None):
         "title": job.get("title"),
         "dest": job["dest"],
         "files": list(job.get("files") or []),
+        "section": job.get("section"),
         "status": job["status"],
         "code": job.get("code"),
         "when": when.isoformat(timespec="seconds"),
