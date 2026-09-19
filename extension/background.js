@@ -39,11 +39,23 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 chrome.runtime.onInstalled.addListener(syncAllTabs);
 chrome.runtime.onStartup.addListener(syncAllTabs);
 
+// A click has no visible result of its own (the app may be behind the
+// browser), so flash a badge: ✓ when the host took the URL, ! when it
+// didn't — otherwise a broken host registration looks like nothing.
+function flashBadge(tabId, ok) {
+  chrome.action.setBadgeBackgroundColor({ tabId, color: ok ? "#32d74b" : "#ff453a" });
+  chrome.action.setBadgeText({ tabId, text: ok ? "✓" : "!" });
+  setTimeout(() => chrome.action.setBadgeText({ tabId, text: "" }), 2000);
+}
+
 chrome.action.onClicked.addListener((tab) => {
   if (!tab.url || !YOUTUBE_PATTERN.test(tab.url)) return;
-  chrome.runtime.sendNativeMessage(HOST_NAME, { url: tab.url }, () => {
+  chrome.runtime.sendNativeMessage(HOST_NAME, { url: tab.url }, (response) => {
     if (chrome.runtime.lastError) {
       console.error("yt-dlp native host error:", chrome.runtime.lastError.message);
+      flashBadge(tab.id, false);
+      return;
     }
+    flashBadge(tab.id, !!(response && response.ok));
   });
 });

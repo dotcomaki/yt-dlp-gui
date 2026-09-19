@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "yt-dlp Quick Download",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Send the current YouTube video URL to the yt-dlp GUI app",
   "browser_specific_settings": {
     "gecko": {

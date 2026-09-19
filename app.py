@@ -4,6 +4,7 @@ import os
 import shlex
 import shutil
 import signal
+import socket
 import ssl
 import subprocess
 import sys
@@ -990,6 +991,20 @@ class Api:
     def set_window(self, window):
         self.window = window
 
+    def add_urls(self, urls):
+        """URLs handed over by a later launch (the extension clicked while
+        the app was open). Runs on the instance-server thread; pywebview's
+        evaluate_js/show are safe to call from there."""
+        if not self.window:
+            return
+        if urls:
+            self.window.evaluate_js(f"receiveUrls({json.dumps(list(urls))})")
+        try:
+            self.window.restore()   # un-minimize if needed
+            self.window.show()      # and bring to the front (activates the app on macOS)
+        except Exception:
+            pass
+
     def choose_folder(self):
         result = self.window.create_file_dialog(webview.FileDialog.FOLDER)
         return result[0] if result else None
@@ -1281,13 +1296,139 @@ class Api:
             pass
 
 
+# --- single instance ----------------------------------------------------------------
+# The browser extension launches `app.py <url>` on every click. When the app
+# is already open that must not become a second window with its own empty
+# queue (and two processes racing on settings.json/history.json), so the
+# running instance listens on a Unix socket and later launches hand their
+# URL over and exit.
+
+class AlreadyRunning(Exception):
+    pass
+
+
+def instance_socket_path():
+    """XDG_RUNTIME_DIR is the proper home for a per-user socket (tmpfs,
+    cleared at logout); macOS has no such thing, so the config dir is the
+    fallback."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime and os.path.isdir(runtime):
+        return os.path.join(runtime, "ytdlp-gui.sock")
+    return config_path("app.sock")
+
+
+def send_to_running_instance(urls, path=None, timeout=2.0):
+    """Hand `urls` to a running app. True only if it acknowledged; False
+    for no socket, a stale socket file, or anything else — the caller
+    then launches normally."""
+    path = path or instance_socket_path()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect(path)
+            s.sendall((json.dumps({"urls": list(urls)}) + "\n").encode("utf-8"))
+            reply = s.makefile("r", encoding="utf-8").readline()
+        return bool(reply) and json.loads(reply).get("ok") is True
+    except (OSError, ValueError):
+        return False
+
+
+class InstanceServer:
+    """One JSON line per connection — {"urls": [...]} — answered with
+    {"ok": true} after `handler(urls)` has run on the server thread."""
+
+    def __init__(self, handler, path=None):
+        self.handler = handler
+        self.path = path or instance_socket_path()
+        self._sock = None
+        self._thread = None
+
+    def start(self):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.bind(self.path)
+        except OSError:
+            # The file exists. Either a live instance holds it (then this
+            # process should hand off, not serve) or it's left over from a
+            # crash and can be replaced.
+            if self._someone_listening():
+                sock.close()
+                raise AlreadyRunning(self.path)
+            try:
+                os.unlink(self.path)
+            except FileNotFoundError:
+                pass
+            sock.bind(self.path)
+        sock.listen(4)
+        self._sock = sock
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _someone_listening(self):
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1.0)
+                probe.connect(self.path)
+            return True
+        except OSError:
+            return False
+
+    def _serve(self):
+        sock = self._sock   # local: close() drops the attribute from another thread
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return   # closed
+            with conn:
+                try:
+                    conn.settimeout(2.0)
+                    line = conn.makefile("r", encoding="utf-8").readline()
+                    if not line.strip():
+                        continue   # a liveness probe, nothing to do
+                    urls = json.loads(line).get("urls") or []
+                    urls = [u for u in urls if isinstance(u, str) and u.strip()]
+                    self.handler(urls)
+                    conn.sendall(b'{"ok": true}\n')
+                except Exception as e:
+                    try:
+                        conn.sendall((json.dumps({"ok": False, "error": str(e)}) + "\n").encode("utf-8"))
+                    except OSError:
+                        pass
+
+    def close(self):
+        if self._sock:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+
 def main():
     initial_url = sys.argv[1] if len(sys.argv) > 1 else ""
+    # Already open? Hand the URL over and get out of the way. With no URL
+    # this just brings the existing window forward.
+    if send_to_running_instance([initial_url] if initial_url else []):
+        return
+
     entry = "ui/index.html"
     if initial_url:
         entry += "?url=" + urllib.parse.quote(initial_url, safe="")
 
     api = Api()
+    server = InstanceServer(api.add_urls)
+    try:
+        server.start()
+    except AlreadyRunning:
+        # Lost a race with another launch between the probe above and bind.
+        if send_to_running_instance([initial_url] if initial_url else []):
+            return
+        server = None   # can't serve, but a window is still better than nothing
     window = webview.create_window(
         "yt-dlp",
         entry,
@@ -1298,7 +1439,11 @@ def main():
         background_color="#1e1e1e",
     )
     api.set_window(window)
-    webview.start()
+    try:
+        webview.start()
+    finally:
+        if server:
+            server.close()
 
 
 if __name__ == "__main__":

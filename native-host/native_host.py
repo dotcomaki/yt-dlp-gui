@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Native messaging host: receives a YouTube URL from the browser extension
-and launches the yt-dlp GUI with that URL pre-filled."""
+"""Native messaging host: receives a URL from the browser extension and
+hands it to the yt-dlp GUI — to the running instance over its socket if
+the app is already open, otherwise by launching it with the URL
+pre-filled."""
 
 import json
 import os
 import platform
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -81,6 +84,31 @@ def send_message(obj):
     sys.stdout.buffer.flush()
 
 
+def instance_socket_path():
+    """Must match app.py's instance_socket_path() — duplicated rather than
+    imported because this host may run under a python without pywebview,
+    and app.py imports webview at the top."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime and os.path.isdir(runtime):
+        return os.path.join(runtime, "ytdlp-gui.sock")
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(config_home, "ytdlp-gui", "app.sock")
+
+
+def send_to_running_instance(url):
+    """True if a running app took the URL; False if nothing is listening
+    (no socket, a stale one, or no reply) — then launch instead."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2.0)
+            s.connect(instance_socket_path())
+            s.sendall((json.dumps({"urls": [url]}) + "\n").encode("utf-8"))
+            reply = s.makefile("r", encoding="utf-8").readline()
+        return bool(reply) and json.loads(reply).get("ok") is True
+    except (OSError, ValueError):
+        return False
+
+
 def launch(url):
     # macOS: hand the launch off to LaunchServices via `open -a` instead of
     # spawning python3 as a direct child of this process. A direct child
@@ -110,13 +138,21 @@ def launch(url):
     )
 
 
+def deliver(url):
+    """How the URL got there: 'running' (handed to the open app) or
+    'launched' (a fresh app started with it)."""
+    if send_to_running_instance(url):
+        return "running"
+    launch(url)
+    return "launched"
+
+
 def main():
     message = read_message()
     url = message.get("url", "")
 
     try:
-        launch(url)
-        send_message({"ok": True})
+        send_message({"ok": True, "delivered": deliver(url)})
     except Exception as e:
         send_message({"ok": False, "error": str(e)})
 

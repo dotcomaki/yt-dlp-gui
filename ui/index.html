@@ -1017,6 +1017,12 @@
                 <label for="cb-notify">Desktop notification when the queue finishes</label>
               </div>
               <div class="hint">One notification per batch, not per video — with the count of finished/failed downloads, or the title when it's just one. Cancelled downloads don't count. macOS shows it via Notification Center; Linux needs <code>notify-send</code>.</div>
+              <h3>Browser extension</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-autoEnqueue" data-bind="extension.autoEnqueue" />
+                <label for="cb-autoEnqueue">Start downloading as soon as the extension sends a URL</label>
+              </div>
+              <div class="hint">Off: the URL lands in the box with a preview and you click Download. On: it goes straight into the queue with the current settings.</div>
             </div>
 
             <div class="adv-category" id="adv-extra">
@@ -1078,6 +1084,7 @@
     postrun: { exec: '' },
     debug: { verbose: false, simulate: false, ignoreErrors: false },
     notifications: { enabled: true },
+    extension: { autoEnqueue: false },
     extraArgs: '',
   };
   const SETTINGS_DEFAULTS = JSON.parse(JSON.stringify(settings));   // pristine copy, for profile fingerprints
@@ -1954,6 +1961,24 @@
     }
   });
 
+  // URLs arriving from outside: the ?url= prefill on a cold start, or a
+  // later launch (extension clicked while the app is open) handing over
+  // through Api.add_urls. Lines already in the box aren't repeated.
+  function receiveUrls(urls) {
+    const fresh = urls.filter(u => u && !parseUrls(urlInput.value).includes(u));
+    if (!fresh.length) return;
+    if (settings.extension && settings.extension.autoEnqueue) {
+      startBatch(fresh, settings, folderInput.value);
+      switchTab('download');
+      return;
+    }
+    const existing = urlInput.value.trim();
+    urlInput.value = (existing ? existing + '\n' : '') + fresh.join('\n');
+    showDownloadError(null);
+    switchTab('download');
+    schedulePreview();
+  }
+
   async function init() {
     let savedDestFolder = null;
     try {
@@ -1973,16 +1998,14 @@
     try { renderQueue(await window.pywebview.api.queue_snapshot()); } catch (err) {}
     refreshHistory();
 
-    const prefillUrl = new URLSearchParams(window.location.search).get('url');
-    if (prefillUrl) {
-      document.getElementById('urlInput').value = prefillUrl;
-      schedulePreview();
-    }
-
     try {
       folderInput.value = savedDestFolder || await window.pywebview.api.default_folder();
     } catch (err) {}
     renderProfiles();
+
+    // After the folder is known — with auto-enqueue on, this starts a download.
+    const prefillUrl = new URLSearchParams(window.location.search).get('url');
+    if (prefillUrl) receiveUrls([prefillUrl]);
 
     let ytdlpFound = false;
     try {
