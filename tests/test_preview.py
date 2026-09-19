@@ -191,15 +191,15 @@ def test_playlist_entries_are_surfaced_in_order_with_title_and_duration():
         ],
     })
     assert info["entries"] == [
-        {"url": "https://v/1", "title": "One", "duration": 61, "uploader": "a"},
-        {"url": "https://v/2", "title": "Two", "duration": None, "uploader": "b"},
-        {"url": "https://v/3", "title": "Three", "duration": 5, "uploader": ""},
+        {"url": "https://v/1", "title": "One", "duration": 61, "uploader": "a", "downloaded": False},
+        {"url": "https://v/2", "title": "Two", "duration": None, "uploader": "b", "downloaded": False},
+        {"url": "https://v/3", "title": "Three", "duration": 5, "uploader": "", "downloaded": False},
     ]
 
 
 def test_playlist_entries_without_a_url_are_skipped_and_titles_fall_back_to_url():
     info = app.summarize_info({"_type": "playlist", "entries": [None, {"title": "no url"}, {"url": "https://v/x"}]})
-    assert info["entries"] == [{"url": "https://v/x", "title": "https://v/x", "duration": None, "uploader": ""}]
+    assert info["entries"] == [{"url": "https://v/x", "title": "https://v/x", "duration": None, "uploader": "", "downloaded": False}]
 
 
 def test_video_info_has_no_entries_key():

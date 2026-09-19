@@ -478,6 +478,10 @@ def build_args(binary, settings, dest, section=None):
         args.append("--no-playlist")
     if playlist.get("maxDownloads"):
         args += ["--max-downloads", str(playlist["maxDownloads"])]
+    if playlist.get("skipDownloaded"):
+        args += ["--download-archive", archive_path()]
+        if playlist.get("breakOnExisting"):
+            args.append("--break-on-existing")
 
     # --- subtitles ---
     if subs.get("write"):
@@ -641,6 +645,7 @@ class DownloadQueue:
                     "pct": 0,
                     "code": None,
                     "files": [],       # final output paths, from --print after_move
+                    "archive": [],     # "<extractor> <id>" per finished video, same source
                     "tail": [],        # last TAIL_LINES of output, for error_hint on failure
                     "hint": None,
                     "section": section,
@@ -786,6 +791,8 @@ class DownloadQueue:
             elif code == 0:
                 job["status"] = "done"
                 job["pct"] = 100
+                if skipped_by_archive(job):
+                    job["hint"] = {"text": "Already in History — skipped", "action": None}
             else:
                 job["status"] = "failed"
                 job["hint"] = error_hint(job.get("tail"))
@@ -805,6 +812,10 @@ def info_args(binary, settings, dest, url):
     geo-bypass, playlist ranges etc. apply exactly as they would to the real
     download; -J implies simulate, so the output/postprocessing flags are
     inert. --flat-playlist keeps a playlist URL to one request."""
+    if skip_downloaded(settings):
+        # -J of an archived video would print nothing but "already recorded";
+        # the preview should still show it (and flag it — see summarize_info)
+        settings = dict(settings, playlist=dict(settings.get("playlist") or {}, skipDownloaded=False))
     return build_args(binary, settings, dest) + ["-J", "--flat-playlist", "--no-warnings", url]
 
 
@@ -858,10 +869,22 @@ def format_selector(fmt):
     return f"{fmt['id']}+bestaudio/best" if fmt["kind"] == "video" else str(fmt["id"])
 
 
-def summarize_entries(entries):
+def archive_line(data):
+    """The --download-archive line yt-dlp would use for this info dict, or
+    None. Flat playlist entries carry ie_key rather than extractor_key."""
+    ext = data.get("extractor_key") or data.get("ie_key")
+    vid = data.get("id")
+    if not ext or not vid:
+        return None
+    return f"{str(ext).lower()} {vid}"
+
+
+def summarize_entries(entries, downloaded=frozenset()):
     """Playlist entries as the picker shows them, in playlist order. Each
     becomes its own queue job when selected, so it needs a URL of its own;
-    entries without one (rare, extractor-specific) are skipped."""
+    entries without one (rare, extractor-specific) are skipped.
+    `downloaded` is the archive set: matching entries are flagged so the
+    picker can start them unticked."""
     out = []
     for e in entries or []:
         if not e:
@@ -874,12 +897,14 @@ def summarize_entries(entries):
             "title": e.get("title") or url,
             "duration": int(e["duration"]) if e.get("duration") else None,
             "uploader": e.get("uploader") or e.get("channel") or "",
+            "downloaded": archive_line(e) in downloaded,
         })
     return out
 
 
-def summarize_info(data):
-    """Trim yt-dlp -J output to what the preview card needs."""
+def summarize_info(data, downloaded=frozenset()):
+    """Trim yt-dlp -J output to what the preview card needs. `downloaded`
+    is the set of archive lines already in history."""
     if data.get("_type") == "playlist":
         entries = data.get("entries") or []
         return {
@@ -890,7 +915,7 @@ def summarize_info(data):
             "thumbnail": data.get("thumbnail") or next((e.get("thumbnail") for e in entries if e and e.get("thumbnail")), None),
             "url": data.get("webpage_url") or data.get("original_url") or "",
             "formats": [],
-            "entries": summarize_entries(entries),
+            "entries": summarize_entries(entries, downloaded),
         }
     return {
         "kind": "video",
@@ -901,6 +926,7 @@ def summarize_info(data):
         "url": data.get("webpage_url") or data.get("original_url") or "",
         "formats": summarize_formats(data.get("formats")),
         "chapters": summarize_chapters(data.get("chapters")),
+        "downloaded": archive_line(data) in downloaded,
     }
 
 
@@ -966,7 +992,10 @@ def summarize_finished(jobs):
 # the progress lines the UI parses, so --no-quiet turns them back on. The
 # marker keeps the printed path out of the log stream.
 FILE_MARKER = "\x1e__ytdlpgui_file__\x1e"
-FILE_PRINT_ARGS = ["--no-quiet", "--print", f"after_move:{FILE_MARKER}%(filepath)s"]
+ARCHIVE_MARKER = "\x1e__ytdlpgui_archive__\x1e"
+FILE_PRINT_ARGS = ["--no-quiet", "--print", f"after_move:{FILE_MARKER}%(filepath)s",
+                   # what yt-dlp itself would write to --download-archive for this video
+                   "--print", f"after_move:{ARCHIVE_MARKER}%(extractor_key)s %(id)s"]
 
 
 # The handful of yt-dlp failures that account for most of them, each with
@@ -995,6 +1024,16 @@ ERROR_HINTS = [
       "unable to download webpage", "http error 429"),
      "yt-dlp is probably out of date, or its cache is stale", "update"),
 ]
+
+
+ARCHIVE_SKIP_TEXT = "has already been recorded in the archive"
+
+
+def skipped_by_archive(job):
+    """yt-dlp exits 0 without producing anything when --download-archive
+    says it's been done; that's not a download, so it shouldn't look like
+    one in the queue or land in history."""
+    return not job.get("files") and any(ARCHIVE_SKIP_TEXT in l for l in job.get("tail") or [])
 
 
 def error_hint(lines):
@@ -1069,6 +1108,11 @@ def run_download_job(job, emit):
         if line.startswith(FILE_MARKER):
             job["files"].append(line[len(FILE_MARKER):])
             continue
+        if line.startswith(ARCHIVE_MARKER):
+            ext, _, vid = line[len(ARCHIVE_MARKER):].partition(" ")
+            if ext and vid and vid != "NA":
+                job.setdefault("archive", []).append(f"{ext.lower()} {vid}")
+            continue
         tail = job.setdefault("tail", [])
         tail.append(line)
         if len(tail) > TAIL_LINES:
@@ -1120,12 +1164,48 @@ def history_entry(job, now=None):
         "dest": job["dest"],
         "files": list(job.get("files") or []),
         "section": job.get("section"),
+        "archive": list(job.get("archive") or []),
         "status": job["status"],
         "code": job.get("code"),
         "when": when.isoformat(timespec="seconds"),
         "quality": quality_label(settings),
         "settings": settings,
     }
+
+
+# --- download archive ---------------------------------------------------------------
+# yt-dlp skips anything listed in --download-archive FILE, one
+# "<extractor> <id>" per line. The history already knows every finished
+# video, so the archive is *derived* from it — regenerated before each
+# batch and whenever history changes — rather than a second source of
+# truth that could drift (yt-dlp appends to the file itself too; those
+# same completions land in history through the print marker).
+
+def archive_path():
+    return config_path("archive.txt")
+
+
+def archive_ids(entries):
+    """Every archive line of every successful history entry, in order,
+    without duplicates."""
+    seen, out = set(), []
+    for e in entries:
+        if e.get("status") != "done":
+            continue
+        for line in e.get("archive") or []:
+            if line and line not in seen:
+                seen.add(line)
+                out.append(line)
+    return out
+
+
+def write_archive(entries):
+    with open(archive_path(), "w") as f:
+        f.write("".join(line + "\n" for line in archive_ids(entries)))
+
+
+def skip_downloaded(settings):
+    return bool((settings.get("playlist") or {}).get("skipDownloaded"))
 
 
 def load_history():
@@ -1282,12 +1362,21 @@ class Api:
         with self._history_lock:
             entries = [e for e in load_history() if e.get("id") != entry_id]
             write_history(entries)
+            self._write_archive_quietly(entries)
         return True
 
     def history_clear(self):
         with self._history_lock:
             write_history([])
+            self._write_archive_quietly([])
         return True
+
+    def _write_archive_quietly(self, entries):
+        # Removing from history means "forget it" — including for the skip list.
+        try:
+            write_archive(entries)
+        except OSError:
+            pass
 
     def reveal(self, path):
         cmd = reveal_command(path)
@@ -1304,6 +1393,8 @@ class Api:
         job = self.queue.get(job_id)
         if not job or job["status"] not in ("done", "failed"):
             return False   # cancelled by the user: nothing worth remembering
+        if job["status"] == "done" and skipped_by_archive(job):
+            return False   # nothing happened; the entry that caused the skip is already there
         try:
             with self._history_lock:
                 entries = load_history()
@@ -1447,13 +1538,24 @@ class Api:
             data = json.loads(stdout)
         except json.JSONDecodeError:
             return {"ok": False, "error": "couldn't parse yt-dlp's output"}
-        info = summarize_info(data)
+        with self._history_lock:
+            downloaded = frozenset(archive_ids(load_history()))
+        info = summarize_info(data, downloaded)
         info["ok"] = True
         return info
 
     def enqueue(self, urls, settings, dest):
         self.queue.set_max_concurrent(parallel_from_settings(settings))
+        if skip_downloaded(settings):
+            self._sync_archive()
         return self.queue.enqueue(urls, settings, dest)
+
+    def _sync_archive(self):
+        try:
+            with self._history_lock:
+                write_archive(load_history())
+        except OSError:
+            pass   # yt-dlp then sees a stale or missing archive; the download still runs
 
     def set_parallel(self, n):
         self.queue.set_max_concurrent(n)

@@ -368,6 +368,13 @@
   .preview-entry .idx { color: var(--text-faint); min-width: 2.2em; text-align: right; flex-shrink: 0; }
   .preview-entry .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .preview-entry .dur { color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .preview-entry .done-tag, .preview-meta .done-tag {
+    color: var(--success);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+  }
   .preview-entry.is-off .name { color: var(--text-dim); }
 
   /* Clip: a time range under the card; chapters reuse the checklist look */
@@ -807,6 +814,15 @@
                 <input type="checkbox" id="cb-noPlaylist" data-bind="playlist.noPlaylist" />
                 <label for="cb-noPlaylist">Only download the single video, not the playlist</label>
               </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-skipDownloaded" data-bind="playlist.skipDownloaded" />
+                <label for="cb-skipDownloaded">Skip videos already in the History tab</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-breakOnExisting" data-bind="playlist.breakOnExisting" />
+                <label for="cb-breakOnExisting">…and stop a playlist at the first one already downloaded</label>
+              </div>
+              <div class="hint">Re-running a channel or playlist then only fetches what's new. The skip list is built from the History tab (<code>--download-archive</code>), so removing an entry there — or clearing history — makes that video downloadable again. The preview marks already-downloaded videos and unticks them in the playlist picker.</div>
             </div>
 
             <div class="adv-category" id="adv-subtitles">
@@ -1126,7 +1142,7 @@
     preset: 'best',
     format: { customFormat: '', mergeOutputFormat: 'mp4', recodeVideo: 'none', preferFreeFormats: false, forceKeyframesAtCuts: false },
     filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false },
-    playlist: { items: '', noPlaylist: false, maxDownloads: '' },
+    playlist: { items: '', noPlaylist: false, maxDownloads: '', skipDownloaded: false, breakOnExisting: false },
     subtitles: { write: false, writeAuto: false, langs: 'en', embed: false },
     thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false },
     audio: { extractAudio: false, audioFormat: 'mp3', audioQuality: '', keepVideo: false },
@@ -1539,7 +1555,7 @@
       main.appendChild(bar);
     }
 
-    if (job.status === 'failed' && job.hint) main.appendChild(hintRow(job));
+    if (job.hint) main.appendChild(hintRow(job));
 
     const status = document.createElement('span');
     status.className = `queue-status s-${job.status}`;
@@ -1815,12 +1831,21 @@
     if (info.uploader) bits.push(info.uploader);
     if (info.duration != null) bits.push(formatDuration(info.duration));
     previewMeta.textContent = bits.join(' · ');
+    if (info.downloaded) {
+      const tag = document.createElement('span');
+      tag.className = 'done-tag';
+      tag.textContent = ' · downloaded';
+      previewMeta.appendChild(tag);
+    }
     previewFormatRows = info.formats || [];
     previewFormatsBtn.hidden = previewFormatRows.length === 0;
     previewFormatsBtn.textContent = `Formats (${previewFormatRows.length})`;
     renderFormatRows();
     previewEntryRows = info.kind === 'playlist' ? (info.entries || []) : [];
-    previewPicked = new Set(previewEntryRows.map((_, i) => i));   // everything on, as a plain playlist download would be
+    // Everything on, as a plain playlist download would be — except what
+    // yt-dlp would skip anyway when the archive is in use.
+    const skipping = settings.playlist.skipDownloaded;
+    previewPicked = new Set(previewEntryRows.map((e, i) => (skipping && e.downloaded) ? -1 : i).filter(i => i >= 0));
     renderEntryRows();
     resetSections();
     if (info.kind !== 'playlist') {
@@ -1853,7 +1878,9 @@
       const idx = document.createElement('span'); idx.className = 'idx'; idx.textContent = String(i + 1);
       const name = document.createElement('span'); name.className = 'name'; name.textContent = e.title; name.title = e.title;
       const dur = document.createElement('span'); dur.className = 'dur'; dur.textContent = formatDuration(e.duration);
-      row.append(cb, idx, name, dur);
+      row.append(cb, idx, name);
+      if (e.downloaded) { const tag = document.createElement('span'); tag.className = 'done-tag'; tag.textContent = 'downloaded'; row.appendChild(tag); }
+      row.appendChild(dur);
       row.classList.toggle('is-off', !cb.checked);
       previewEntriesList.appendChild(row);
     });
