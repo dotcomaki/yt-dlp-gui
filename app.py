@@ -30,6 +30,41 @@ FFMPEG_CANDIDATES = [
     "/usr/bin/ffmpeg",
 ]
 
+
+def _nvm_node_candidates():
+    """Every ~/.nvm/versions/node/vX.Y.Z/bin/node, newest version first.
+    nvm doesn't put node on the PATH of anything that isn't an interactive
+    shell, so the app has to find it by hand. The version is parsed
+    numerically: string order would rank v9 above v22."""
+    root = os.path.expanduser("~/.nvm/versions/node")
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return []
+    versions = {}
+    for name in names:
+        m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", name)
+        if m:
+            versions[name] = tuple(int(x) for x in m.groups())
+    return [os.path.join(root, name, "bin", "node")
+            for name in sorted(versions, key=versions.get, reverse=True)]
+
+
+def _runtime_candidates(name, *extra):
+    return [shutil.which(name), f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}",
+            f"/usr/bin/{name}", *extra]
+
+
+# In yt-dlp's own priority order (deno, node, quickjs, bun — see
+# `yt-dlp --help`, --js-runtimes). Only deno is enabled by default; the
+# others must be named explicitly.
+JS_RUNTIME_CANDIDATES = [
+    ("deno", _runtime_candidates("deno", os.path.expanduser("~/.deno/bin/deno"))),
+    ("node", _runtime_candidates("node", *_nvm_node_candidates())),
+    ("quickjs", _runtime_candidates("quickjs")),
+    ("bun", _runtime_candidates("bun", os.path.expanduser("~/.bun/bin/bun"))),
+]
+
 PROGRESS_RE = re.compile(
     r"\[download\]\s+(?P<pct>[\d.]+)%.*?of\s+~?(?P<size>[\d.]+\S+)"
     r"(?:\s+at\s+(?P<speed>[\d.]+\S+/s))?(?:\s+ETA\s+(?P<eta>\S+))?"
@@ -67,6 +102,17 @@ def find_ytdlp():
 
 def find_ffmpeg():
     return _first_executable(FFMPEG_CANDIDATES)
+
+
+def find_js_runtime():
+    """(name, path) of the highest-priority JavaScript runtime installed, or
+    None. YouTube extraction needs one (its EJS challenge solver) — without
+    it yt-dlp warns and some formats go missing."""
+    for name, candidates in JS_RUNTIME_CANDIDATES:
+        path = _first_executable(candidates)
+        if path:
+            return name, path
+    return None
 
 
 def config_path(name):
@@ -310,6 +356,15 @@ def build_args(binary, settings, dest):
     ffmpeg_path = find_ffmpeg()
     if ffmpeg_path:
         args += ["--ffmpeg-location", ffmpeg_path]
+
+    # Same story for the JavaScript runtime YouTube extraction needs: yt-dlp
+    # only enables deno by default and only looks for it on PATH, so an
+    # nvm-installed node (or a Homebrew deno under that minimal PATH) is
+    # invisible to it. Name the runtime and say where it is.
+    js_runtime = find_js_runtime()
+    if js_runtime:
+        name, path = js_runtime
+        args += ["--js-runtimes", f"{name}:{path}"]
 
     # --- filename / output template ---
     template = (filename.get("template") or "%(title)s.%(ext)s").strip()
@@ -1117,7 +1172,11 @@ class Api:
     def check_binary(self):
         path = find_ytdlp()
         ffmpeg_path = find_ffmpeg()
-        info = {"ffmpeg": bool(ffmpeg_path)}
+        js_runtime = find_js_runtime()
+        info = {
+            "ffmpeg": bool(ffmpeg_path),
+            "jsRuntime": dict(zip(("name", "path"), js_runtime)) if js_runtime else None,
+        }
         if not path:
             info["found"] = False
             return info

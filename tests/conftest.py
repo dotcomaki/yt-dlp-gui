@@ -4,6 +4,8 @@ import tempfile
 
 import pytest
 
+import app
+
 
 @pytest.fixture(autouse=True)
 def isolated_config_dir(tmp_path, monkeypatch):
@@ -23,3 +25,12 @@ def sock_path():
         yield os.path.join(d, "s")
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def no_js_runtime(monkeypatch):
+    """build_args() (and so info_args() and every job) calls
+    find_js_runtime() to inject --js-runtimes. Empty the candidate list so
+    argv never depends on which runtime the test machine happens to have;
+    tests that want one set their own candidates or pin find_js_runtime."""
+    monkeypatch.setattr(app, "JS_RUNTIME_CANDIDATES", [])

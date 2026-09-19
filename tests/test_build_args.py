@@ -47,6 +47,26 @@ def test_ffmpeg_location_omitted_when_not_found(monkeypatch):
     assert "--ffmpeg-location" not in args
 
 
+def test_js_runtime_flag_included_as_name_colon_path(monkeypatch):
+    monkeypatch.setattr(app, "find_js_runtime", lambda: ("node", "/home/u/.nvm/versions/node/v22.12.0/bin/node"))
+    args = app.build_args("yt-dlp", {}, "/tmp")
+    assert flag_value(args, "--js-runtimes") == "node:/home/u/.nvm/versions/node/v22.12.0/bin/node"
+
+
+def test_js_runtime_flag_explicit_even_for_deno(monkeypatch):
+    # deno is yt-dlp's default, but under the extension's minimal PATH it
+    # still wouldn't find it on its own — the location is always spelled out.
+    monkeypatch.setattr(app, "find_js_runtime", lambda: ("deno", "/opt/homebrew/bin/deno"))
+    args = app.build_args("yt-dlp", {}, "/tmp")
+    assert flag_value(args, "--js-runtimes") == "deno:/opt/homebrew/bin/deno"
+
+
+def test_js_runtime_flag_omitted_when_not_found():
+    # conftest empties JS_RUNTIME_CANDIDATES, so nothing is found here.
+    args = app.build_args("yt-dlp", {}, "/tmp")
+    assert "--js-runtimes" not in args
+
+
 # --- filename / output template -------------------------------------------
 
 def test_custom_output_template():

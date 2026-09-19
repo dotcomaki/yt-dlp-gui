@@ -559,6 +559,7 @@
       <div class="status-block">
         <div class="status-line status-line-clickable" id="ytdlpStatusLine" title="Click to check for updates"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
         <div class="status-line"><span class="status-dot" id="ffmpegDot"></span><span id="ffmpegText">Checking ffmpeg…</span></div>
+        <div class="status-line"><span class="status-dot" id="jsRuntimeDot"></span><span id="jsRuntimeText">Checking JS runtime…</span></div>
         <button class="small-btn update-btn" id="ytdlpUpdateBtn" hidden>Update</button>
         <div class="status-line" id="configStatusLine" hidden><span class="status-dot err"></span><span id="configStatusText"></span></div>
       </div>
@@ -2026,6 +2027,17 @@
         ffmpegDot.classList.add('err');
         ffmpegText.textContent = 'ffmpeg missing — max 720p, no merging';
         ffmpegText.parentElement.title = 'Without ffmpeg, separate video and audio streams can\'t be merged, so downloads fall back to the best single stream (720p at most on YouTube). Install it: brew install ffmpeg (macOS) or sudo apt install ffmpeg (Linux), then relaunch.';
+      }
+      const jsRuntimeDot = document.getElementById('jsRuntimeDot');
+      const jsRuntimeText = document.getElementById('jsRuntimeText');
+      if (info.jsRuntime) {
+        jsRuntimeDot.classList.add('ok');
+        jsRuntimeText.textContent = 'JS runtime: ' + info.jsRuntime.name;
+        jsRuntimeText.parentElement.title = info.jsRuntime.path;
+      } else {
+        jsRuntimeDot.classList.add('warn');
+        jsRuntimeText.textContent = 'no JS runtime — YouTube may lose formats';
+        jsRuntimeText.parentElement.title = 'YouTube now needs a JavaScript runtime to solve its player challenges; without one yt-dlp warns and some formats are missing. Install deno (recommended) or node: brew install deno (macOS), sudo apt install deno or nodejs (Linux), or curl -fsSL https://deno.land/install.sh | sh — then relaunch.';
       }
     } catch (err) {
       ytdlpText.textContent = 'Backend not ready';

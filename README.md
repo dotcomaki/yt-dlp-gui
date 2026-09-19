@@ -29,6 +29,7 @@ The sections below are what `install.sh` is actually doing under the hood, usefu
 
 - Python 3.9+, `pywebview` + `certifi` (`pip install -r requirements.txt`; `certifi` is what lets the update check reach GitHub over HTTPS from python.org's macOS Python, whose bundled OpenSSL ships with an empty trust store) — **Linux only:** don't run that command as-is; `pywebview` needs a system-level GTK or Qt backend pip can't provide, and most distros now block a plain `pip install` outside a virtualenv anyway (PEP 668). See [`linux/README.md`](linux/README.md#system-dependencies) for the actual steps.
 - `ffmpeg` — required to merge separate video+audio streams; without it, downloads above 720p will have no audio. macOS: `brew install ffmpeg`. Linux: `sudo apt install ffmpeg` (or your distro's equivalent)
+- A JavaScript runtime — YouTube now requires one (yt-dlp runs the player's challenge-solving JS through it); without one yt-dlp warns on every YouTube download and some formats are missing. `deno` is what yt-dlp recommends (`brew install deno`, `sudo apt install deno`, or `curl -fsSL https://deno.land/install.sh | sh`); `node` works too (`brew install node`, `sudo apt install nodejs`, or an nvm install). The app looks on your `PATH`, in the Homebrew/`/usr/local`/`/usr/bin` locations, `~/.deno/bin`, `~/.bun/bin` and the newest `~/.nvm/versions/node/*`, and passes what it finds to yt-dlp as `--js-runtimes` — same as it passes `--ffmpeg-location` — because apps launched from the browser extension get a minimal `PATH` that yt-dlp's own search doesn't cope with. The sidebar shows which one is in use.
 - `yt-dlp` on your `PATH` (or, macOS only, at `/usr/local/bin/yt-dlp` or `~/Downloads/yt-dlp_macos`)
 
 ## Run from source
@@ -90,7 +91,7 @@ yt-dlp supports far more sites than YouTube, but the extension only triggers on 
 
 ## Running the tests
 
-Covers `build_args()` (the settings-dict-to-yt-dlp-argv translator — the highest-value target, since every Advanced-tab option flows through it), the `find_ytdlp`/`find_ffmpeg` candidate-list detection, the download queue, preview, history, profiles, notifications and update checker, and the frontend's settings helpers (`ui/utils.js`). Tests point `XDG_CONFIG_HOME` at a temp dir (`tests/conftest.py`), so they never touch your real `~/.config/ytdlp-gui`. Deliberately out of scope: anything needing a real browser extension load or an actual GUI window — those stay manual, same as the rest of this README.
+Covers `build_args()` (the settings-dict-to-yt-dlp-argv translator — the highest-value target, since every Advanced-tab option flows through it), the `find_ytdlp`/`find_ffmpeg`/`find_js_runtime` candidate-list detection, the download queue, preview, history, profiles, notifications and update checker, and the frontend's settings helpers (`ui/utils.js`). Tests point `XDG_CONFIG_HOME` at a temp dir (`tests/conftest.py`), so they never touch your real `~/.config/ytdlp-gui`. Deliberately out of scope: anything needing a real browser extension load or an actual GUI window — those stay manual, same as the rest of this README.
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
