@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)
 ![yt-dlp](https://img.shields.io/badge/powered%20by-yt--dlp-red)
 
-A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with Python + [pywebview](https://pywebview.flowrl.com/). Includes a browser extension that sends the current YouTube tab straight to the app.
+A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with Python + [pywebview](https://pywebview.flowrl.com/). Includes a browser extension that sends the current tab — or any right-clicked link — straight to the app.
 
 **Platform:** macOS is primary and what's actually been tested; Linux support exists but is untested (written to spec) — see [`linux/README.md`](linux/README.md) for Linux-specific setup (an extra system dependency `pywebview` needs, and Linux's native-messaging paths). Every section below is written for macOS unless a Linux note is called out inline.
 
@@ -43,7 +43,7 @@ Pass a URL as an argument to pre-fill it: `python3 app.py "https://youtube.com/w
 
 ## Browser extension (Chrome/Arc/Brave/Edge/Chromium/Vivaldi on macOS; Chrome/Chromium/Brave/Edge/Vivaldi on Linux; Firefox — see below)
 
-Clicking the extension's toolbar icon on a YouTube page launches the yt-dlp GUI with that video's URL pre-filled. The icon is only enabled while you're on a `youtube.com` page.
+Clicking the extension's toolbar icon sends the current tab's URL to the yt-dlp GUI (launching it if it isn't open). It works on any `http(s)` page — yt-dlp supports around 1,800 sites plus a generic extractor for pages with a media file on them, so the button is greyed out only on the browser's own pages (`chrome://`, `about:`, `file:`). Right-click a link, a video element, or the page for **Download with yt-dlp**, which sends the link's target rather than the page you're on — handy on a search-results or playlist page. **Alt+Shift+Y** does the same as clicking the icon (change it under `chrome://extensions/shortcuts`).
 
 **How it works:** the extension talks to a native messaging host (`native-host/native_host.py`) registered with the browser. If the app is already open, the host hands the URL to it over a local socket (`~/.config/ytdlp-gui/app.sock`, or under `$XDG_RUNTIME_DIR` on Linux) — the URL lands in the box with a preview and the window comes to the front; no second window, ever. The extension's icon flashes ✓ when the URL was delivered and ! when it wasn't. Only when nothing is listening does the host launch the app:
 - **macOS:** launches via `open -a yt-dlp.app --args <url>` — a small self-locating app bundle checked into the repo (no `/Applications` install needed). This matters, not just for convenience: spawning `python3` as a *direct child* of the native messaging host inherits the browser's process ancestry for macOS's Gatekeeper "responsible launcher" tracking, which can trigger a false-positive "is damaged, move to Trash" dialog blaming the browser for a file it never touched — even for a correctly-signed, unquarantined interpreter. `open -a` hands the launch to LaunchServices as an independent process, breaking that ancestry chain.
@@ -70,9 +70,9 @@ The extension's `manifest.json` embeds a fixed signing key so its ID is always `
 
 Firefox needs its own extension folder (`firefox-extension/`) since its manifest format and native-messaging conventions differ from Chrome's, plus it requires either Mozilla-signing or a Nightly/Developer Edition build with signature enforcement disabled to install an extension persistently — there's no equivalent to Chrome's "Load unpacked" dev mode. See [`firefox-extension/README.md`](firefox-extension/README.md) for the full setup (untested — written to Mozilla's documented spec).
 
-## Non-YouTube URLs
+## URLs without the extension
 
-yt-dlp supports far more sites than YouTube, but the extension only triggers on `youtube.com`. For anything else, just run `python3 app.py "<url>"` from this folder.
+`python3 app.py "<url>"` from this folder pre-fills the URL (or hands it to the app if it's already open).
 
 ## Features
 

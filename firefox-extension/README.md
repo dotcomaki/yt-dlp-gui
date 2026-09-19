@@ -1,6 +1,6 @@
 # Firefox extension
 
-Same behavior as the Chrome/Arc extension — clicking the toolbar icon on a YouTube page launches the yt-dlp GUI with that video's URL pre-filled. `background.js` and the icons are symlinked from `../extension/` (identical logic; Firefox implements the same `chrome.*` API namespace), only `manifest.json` differs, since Firefox's extension ID and background-script declaration work differently from Chrome's.
+Same behavior as the Chrome/Arc extension — the toolbar icon sends the current tab to the yt-dlp GUI, and the right-click menu sends any link. `background.js` and the icons are symlinked from `../extension/` (identical logic; Firefox implements the same `chrome.*` API namespace), only `manifest.json` differs, since Firefox's extension ID and background-script declaration work differently from Chrome's.
 
 > This uses the **Nightly/unsigned route** — matching how the Chrome extension is set up (load it locally, no store submission). Regular release-channel Firefox requires every extension to be signed by Mozilla to install persistently; Nightly and Developer Edition let you turn that requirement off.
 

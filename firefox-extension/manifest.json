@@ -1,22 +1,44 @@
 {
   "manifest_version": 3,
   "name": "yt-dlp Quick Download",
-  "version": "1.1",
-  "description": "Send the current YouTube video URL to the yt-dlp GUI app",
+  "version": "1.2",
+  "description": "Send the current tab, or any link, to the yt-dlp GUI app",
   "browser_specific_settings": {
     "gecko": {
       "id": "ytdlp-gui@dotcomaki.dev",
       "strict_min_version": "115.0"
     }
   },
-  "permissions": ["nativeMessaging", "tabs", "activeTab"],
-  "host_permissions": ["*://*.youtube.com/*"],
+  "permissions": [
+    "nativeMessaging",
+    "tabs",
+    "activeTab",
+    "contextMenus"
+  ],
   "action": {
-    "default_title": "Send to yt-dlp",
-    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+    "default_title": "Download with yt-dlp",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
-  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+Y"
+      },
+      "description": "Send the current tab to yt-dlp"
+    }
+  },
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   }
 }
