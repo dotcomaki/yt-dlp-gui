@@ -209,13 +209,15 @@
 
   .seg {
     display: flex;
+    flex-wrap: wrap;
     background: var(--bg-field);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 2px;
   }
   .seg button {
-    flex: 1;
+    flex: 1 0 auto;
+    min-width: 58px;
     background: transparent;
     border: none;
     color: var(--text-dim);
@@ -665,9 +667,13 @@
         <div class="field">
           <label>Quality</label>
           <div class="seg" id="presetSeg">
-            <button data-preset="best" class="active">Best</button>
+            <button data-preset="best" class="active" title="Best video + best audio, whatever the codecs (VP9/AV1 + Opus on YouTube)">Best</button>
+            <button data-preset="2160p" title="Up to 2160p">4K</button>
+            <button data-preset="1440p">1440p</button>
+            <button data-preset="1080p">1080p</button>
             <button data-preset="720p">720p</button>
             <button data-preset="480p">480p</button>
+            <button data-preset="compat" title="Prefer H.264 + AAC in an mp4 — plays everywhere (QuickTime, TVs, phones); usually tops out at 1080p on YouTube">Compatible</button>
             <button data-preset="audio">Audio only</button>
             <button data-preset="custom">Custom</button>
           </div>
@@ -756,11 +762,24 @@
                     <option value="mp4">mp4</option>
                     <option value="mkv">mkv</option>
                     <option value="webm">webm</option>
-                    <option value="none">Don't force</option>
+                    <option value="none">Auto (let yt-dlp choose)</option>
                   </select>
                 </div>
                 <div class="field">
-                  <label>Recode video to</label>
+                  <label>Remux video to <span class="hint-inline">(lossless, just the container)</span></label>
+                  <select data-bind="format.remuxVideo">
+                    <option value="none">Don't remux</option>
+                    <option value="mp4">mp4</option>
+                    <option value="mkv">mkv</option>
+                    <option value="webm">webm</option>
+                    <option value="mov">mov</option>
+                    <option value="avi">avi</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Recode video to <span class="hint-inline">(re-encodes; slow, lossy)</span></label>
                   <select data-bind="format.recodeVideo">
                     <option value="none">Don't recode</option>
                     <option value="mp4">mp4</option>
@@ -769,6 +788,7 @@
                     <option value="avi">avi</option>
                     <option value="mov">mov</option>
                   </select>
+                  <div class="hint">Remux and recode can't both apply; remux wins. Reach for recode only when the codecs themselves need changing.</div>
                 </div>
               </div>
               <div class="checkbox-row">
@@ -1176,7 +1196,7 @@
 <script>
   const settings = {
     preset: 'best',
-    format: { customFormat: '', mergeOutputFormat: 'mp4', recodeVideo: 'none', preferFreeFormats: false, forceKeyframesAtCuts: false },
+    format: { customFormat: '', mergeOutputFormat: 'mp4', remuxVideo: 'none', recodeVideo: 'none', preferFreeFormats: false, forceKeyframesAtCuts: false },
     filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false },
     playlist: { items: '', noPlaylist: false, maxDownloads: '', skipDownloaded: false, breakOnExisting: false },
     subtitles: { write: false, writeAuto: false, langs: 'en', embed: false },

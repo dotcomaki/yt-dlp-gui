@@ -445,3 +445,37 @@ def test_rate_limit_splits_across_jobs_actually_sharing_it():
     assert flag_value(app.build_args("yt-dlp", settings, "/tmp", slots=1), "--limit-rate") == "1M"   # alone: as typed
     assert flag_value(app.build_args("yt-dlp", settings, "/tmp", slots=2), "--limit-rate") == str(1024 ** 2 // 2)
     assert flag_value(app.build_args("yt-dlp", settings, "/tmp"), "--limit-rate") == str(1024 ** 2 // 4)   # no queue info: the setting
+
+
+# --- more presets, Compatible, remux (#21) ----------------------------------------------
+
+@pytest.mark.parametrize("preset,height", [("2160p", 2160), ("1440p", 1440), ("1080p", 1080), ("720p", 720), ("480p", 480)])
+def test_height_presets(preset, height):
+    args = app.build_args("yt-dlp", {"preset": preset}, "/tmp")
+    assert flag_value(args, "-f") == f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+    assert "-S" not in args
+
+
+def test_compatible_preset_prefers_h264_aac_in_mp4():
+    args = app.build_args("yt-dlp", {"preset": "compat", "format": {"mergeOutputFormat": "mkv"}}, "/tmp")
+    assert flag_value(args, "-f") == "bestvideo+bestaudio/best"
+    assert flag_value(args, "-S") == "vcodec:h264,res,acodec:m4a"
+    assert flag_value(args, "--merge-output-format") == "mp4"      # overrides the merge setting
+
+
+def test_compatible_without_ffmpeg_wants_a_single_avc_stream(monkeypatch):
+    monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
+    args = app.build_args("yt-dlp", {"preset": "compat"}, "/tmp")
+    assert flag_value(args, "-f").startswith("best[vcodec^=avc1][acodec^=mp4a]") and "-S" not in args
+
+
+def test_remux_wins_over_recode():
+    args = app.build_args("yt-dlp", {"format": {"remuxVideo": "mkv", "recodeVideo": "mp4"}}, "/tmp")
+    assert flag_value(args, "--remux-video") == "mkv" and "--recode-video" not in args
+    args = app.build_args("yt-dlp", {"format": {"remuxVideo": "none", "recodeVideo": "mp4"}}, "/tmp")
+    assert flag_value(args, "--recode-video") == "mp4" and "--remux-video" not in args
+
+
+def test_quality_label_for_compat():
+    assert app.quality_label({"preset": "compat"}) == "compatible (h264/aac mp4)"
+    assert app.quality_label({"preset": "1080p"}) == "1080p"

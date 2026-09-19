@@ -73,19 +73,32 @@ PROGRESS_RE = re.compile(
 # Per `yt-dlp --help`: valid for --sponsorblock-mark but not --sponsorblock-remove.
 SPONSORBLOCK_MARK_ONLY = {"poi_highlight", "chapter"}
 
+def _capped(height):
+    return f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+
+
 QUALITY_FORMATS = {
     "best": "bestvideo+bestaudio/best",
-    "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
-    "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
+    "2160p": _capped(2160),
+    "1440p": _capped(1440),
+    "1080p": _capped(1080),
+    "720p": _capped(720),
+    "480p": _capped(480),
+    # "Compatible": prefer H.264 video and AAC audio in an mp4 — what
+    # QuickTime, TVs and phones play without complaint, instead of the
+    # VP9/AV1+Opus that "best" picks on YouTube. The -S sort does the
+    # preferring; the format string stays the plain best-of-each.
+    "compat": "bestvideo+bestaudio/best",
     "audio": "bestaudio/best",
 }
+COMPAT_SORT = "vcodec:h264,res,acodec:m4a"
 
 # What the presets degrade to when ffmpeg is missing: a single stream that
 # already contains both video and audio, so nothing needs merging.
 NO_FFMPEG_FORMATS = {
     "best": "best[vcodec!=none][acodec!=none]/best",
-    "720p": "best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]",
-    "480p": "best[height<=480][vcodec!=none][acodec!=none]/best[height<=480]",
+    "compat": "best[vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best",
+    **{f"{h}p": f"best[height<={h}][vcodec!=none][acodec!=none]/best[height<={h}]" for h in (2160, 1440, 1080, 720, 480)},
 }
 
 
@@ -462,13 +475,21 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args += ["-f", NO_FFMPEG_FORMATS.get(preset, NO_FFMPEG_FORMATS["best"])]
     else:
         args += ["-f", custom_format or QUALITY_FORMATS.get(preset, QUALITY_FORMATS["best"])]
+        if preset == "compat" and not custom_format:
+            args += ["-S", COMPAT_SORT]
         merge_fmt = fmt.get("mergeOutputFormat") or "mp4"
+        if preset == "compat":
+            merge_fmt = "mp4"   # the whole point of the preset
         if merge_fmt != "none":
             args += ["--merge-output-format", merge_fmt]
 
     if fmt.get("preferFreeFormats"):
         args.append("--prefer-free-formats")
-    if fmt.get("recodeVideo") and fmt["recodeVideo"] != "none":
+    # Remux is a lossless container change; recode re-encodes. Both set
+    # would be contradictory — yt-dlp itself refuses the pair — so remux wins.
+    if fmt.get("remuxVideo") and fmt["remuxVideo"] != "none":
+        args += ["--remux-video", fmt["remuxVideo"]]
+    elif fmt.get("recodeVideo") and fmt["recodeVideo"] != "none":
         args += ["--recode-video", fmt["recodeVideo"]]
     if audio.get("keepVideo"):
         args.append("--keep-video")
@@ -1166,6 +1187,8 @@ def quality_label(settings):
     if preset == "audio":
         fmt = (settings.get("audio") or {}).get("audioFormat") or ""
         return f"audio ({fmt})" if fmt and (settings.get("audio") or {}).get("extractAudio") else "audio"
+    if preset == "compat":
+        return "compatible (h264/aac mp4)"
     return preset
 
 
