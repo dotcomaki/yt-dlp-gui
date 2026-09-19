@@ -19,6 +19,9 @@
   }
 
   * { box-sizing: border-box; }
+  /* `hidden` loses to any class that sets display (flex rows, cards, status
+     lines) — this keeps the attribute meaning what it says everywhere. */
+  [hidden] { display: none !important; }
 
   html, body {
     margin: 0;
@@ -287,7 +290,6 @@
     background: var(--bg-field);
     flex-shrink: 0;
   }
-  .preview-thumb[hidden] { display: none; }
   .preview-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .preview-title {
     font-size: 13px;
