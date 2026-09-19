@@ -150,11 +150,21 @@ def test_fetch_info_parses_json(tmp_path, monkeypatch):
 
 
 def test_fetch_info_reports_ytdlp_failure_with_last_stderr_line(tmp_path, monkeypatch):
-    exe = stub_ytdlp(tmp_path, "echo 'WARNING: something' >&2\necho 'ERROR: [youtube] abc: Video unavailable' >&2\nexit 1\n")
+    exe = stub_ytdlp(tmp_path, "echo 'WARNING: something' >&2\necho 'ERROR: [youtube] abc: something new and unknown' >&2\nexit 1\n")
     monkeypatch.setattr(app, "find_ytdlp", lambda: exe)
     monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
     info = app.Api().fetch_info("https://v", {}, str(tmp_path))
-    assert info == {"ok": False, "error": "ERROR: [youtube] abc: Video unavailable"}
+    assert info == {"ok": False, "error": "ERROR: [youtube] abc: something new and unknown"}
+
+
+def test_fetch_info_prefers_a_recognised_failure_over_the_last_line(tmp_path, monkeypatch):
+    # with --verbose the last line is a debug header; the real error is earlier
+    exe = stub_ytdlp(tmp_path, "echo 'ERROR: [youtube] abc: Sign in to confirm you\u2019re not a bot' >&2\n"
+                               "echo '[debug] Exiting' >&2\nexit 1\n")
+    monkeypatch.setattr(app, "find_ytdlp", lambda: exe)
+    monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
+    info = app.Api().fetch_info("https://v", {}, str(tmp_path))
+    assert info["error"].startswith("YouTube wants a signed-in session") and info["hint"]["action"] == "cookies"
 
 
 def test_fetch_info_handles_garbage_output(tmp_path, monkeypatch):

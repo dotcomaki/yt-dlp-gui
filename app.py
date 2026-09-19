@@ -574,6 +574,8 @@ class DownloadQueue:
                     "pct": 0,
                     "code": None,
                     "files": [],       # final output paths, from --print after_move
+                    "tail": [],        # last TAIL_LINES of output, for error_hint on failure
+                    "hint": None,
                     "proc": None,
                     "cancel": False,
                     "reported": False,
@@ -660,7 +662,20 @@ class DownloadQueue:
         return next((j for j in self._jobs if j["id"] == job_id), None)
 
     def _public(self, job):
-        return {k: job[k] for k in ("id", "url", "status", "title", "pct", "code")}
+        return {k: job[k] for k in ("id", "url", "status", "title", "pct", "code", "hint")}
+
+    def retry(self, job_id):
+        """A fresh job with the same url/title/settings/dest as a finished
+        one (failed or cancelled). The old row stays; returns the new id,
+        or None if the job is unknown or still active."""
+        with self._lock:
+            job = self._find(job_id)
+            if not job or job["status"] not in TERMINAL_STATUSES:
+                return None
+            item = {"url": job["url"], "title": job["title"]}
+            settings, dest = job["settings"], job["dest"]
+        ids = self.enqueue([item], settings, dest)
+        return ids[0] if ids else None
 
     def _emit_queue(self):
         self._emit("ytdlp-queue", {"jobs": self.snapshot()})
@@ -705,6 +720,7 @@ class DownloadQueue:
                 job["pct"] = 100
             else:
                 job["status"] = "failed"
+                job["hint"] = error_hint(job.get("tail"))
             status = job["status"]
         self._emit("ytdlp-done", {
             "jobId": job["id"],
@@ -874,6 +890,50 @@ FILE_MARKER = "\x1e__ytdlpgui_file__\x1e"
 FILE_PRINT_ARGS = ["--no-quiet", "--print", f"after_move:{FILE_MARKER}%(filepath)s"]
 
 
+# The handful of yt-dlp failures that account for most of them, each with
+# what to do about it. Matched as case-insensitive substrings against the
+# job's last lines, first entry wins — so the specific ones come first.
+# `action` names a button the UI knows how to render (or None).
+ERROR_HINTS = [
+    # "sign in to confirm you’re not a bot" — typographic apostrophe in the
+    # real message, so match the part before it
+    (("sign in to confirm you", "sign in if you", "requires login",
+      "login required", "please sign in", "use --cookies"),
+     "YouTube wants a signed-in session — use your browser's cookies", "cookies"),
+    (("requested format is not available",),
+     "That format doesn't exist for this video — pick one from the format list", "formats"),
+    (("no such option",),
+     "Unrecognised option in Extra Arguments", "extra"),
+    (("ffprobe and ffmpeg not found", "ffmpeg not found", "ffmpeg is not installed"),
+     "ffmpeg is missing — install it and relaunch (see the sidebar)", None),
+    (("private video", "video unavailable", "video is unavailable", "has been removed", "this video is not available",
+      "members-only", "join this channel", "not available in your country", "geo restricted",
+      "geo-restricted"),
+     "The video isn't accessible (private, removed, region- or member-locked)", None),
+    (("unsupported url",),
+     "yt-dlp doesn't have an extractor for this site", None),
+    (("http error 403", "unable to extract", "nsig extraction failed", "signature extraction failed",
+      "unable to download webpage", "http error 429"),
+     "yt-dlp is probably out of date, or its cache is stale", "update"),
+]
+
+
+def error_hint(lines):
+    """{"text", "action"} for the first known failure found in `lines`
+    (a job's stderr tail, newest last), or None. Deliberately a small
+    table of literal substrings, not a parser."""
+    haystack = "\n".join(lines or []).lower()
+    if not haystack.strip():
+        return None
+    for needles, text, action in ERROR_HINTS:
+        if any(n in haystack for n in needles):
+            return {"text": text, "action": action}
+    return None
+
+
+TAIL_LINES = 30
+
+
 def terminate_job(proc):
     """SIGTERM the job's whole process group (yt-dlp plus any ffmpeg it is
     running for a merge/recode/extract), falling back to just the process
@@ -930,6 +990,10 @@ def run_download_job(job, emit):
         if line.startswith(FILE_MARKER):
             job["files"].append(line[len(FILE_MARKER):])
             continue
+        tail = job.setdefault("tail", [])
+        tail.append(line)
+        if len(tail) > TAIL_LINES:
+            del tail[:-TAIL_LINES]
         emit("ytdlp-log", {"jobId": job["id"], "line": line})
         title = title_from_log_line(line)
         if title and not job["title"]:
@@ -1293,6 +1357,11 @@ class Api:
             if proc.returncode < 0:
                 return {"ok": False, "error": "cancelled"}   # superseded by a newer lookup
             err = (stderr or "").strip().splitlines()
+            # With --verbose the last line is often a debug header, not the
+            # error; a recognised failure anywhere in stderr reads better.
+            hint = error_hint(err[-TAIL_LINES:])
+            if hint:
+                return {"ok": False, "error": hint["text"], "hint": hint}
             return {"ok": False, "error": err[-1] if err else f"yt-dlp exited with code {proc.returncode}"}
         try:
             data = json.loads(stdout)
@@ -1309,6 +1378,30 @@ class Api:
     def set_parallel(self, n):
         self.queue.set_max_concurrent(n)
         return True
+
+    def retry_download(self, job_id):
+        return self.queue.retry(job_id)
+
+    def clear_ytdlp_cache(self):
+        """`yt-dlp --rm-cache-dir` — the standard first step for 403s and
+        stale signature functions. Logged like an update."""
+        binary = find_ytdlp()
+        if not binary:
+            return {"ok": False, "error": "yt-dlp not found"}
+        cmd = [binary, "--rm-cache-dir"]
+        self._emit("ytdlp-log", {"line": f"$ {' '.join(shlex.quote(a) for a in cmd)}"})
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._emit("ytdlp-log", {"line": f"Error: {e}"})
+            return {"ok": False, "error": str(e)}
+        for line in (proc.stdout + proc.stderr).splitlines():
+            if line.strip():
+                self._emit("ytdlp-log", {"line": line})
+        if proc.returncode != 0:
+            return {"ok": False, "error": f"yt-dlp exited with code {proc.returncode}"}
+        self._emit("ytdlp-log", {"line": "yt-dlp cache cleared."})
+        return {"ok": True}
 
     def cancel_download(self, job_id):
         return self.queue.cancel(job_id)

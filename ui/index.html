@@ -458,6 +458,19 @@
     flex-shrink: 0;
   }
   .queue-x:hover { color: var(--text); background: var(--bg-field); }
+  /* Why a job failed, and the button that fixes it, under the failed row */
+  .queue-hint {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
+  .queue-hint .small-btn { padding: 3px 8px; font-size: 11px; }
+  .queue-retry { flex-shrink: 0; }
+  .sidebar-btn-row { display: flex; gap: 6px; }
 
   /* Profiles: dropdown applies a saved configuration; Save… opens an inline name field */
   .profile-row { display: flex; gap: 8px; align-items: center; }
@@ -560,7 +573,10 @@
         <div class="status-line status-line-clickable" id="ytdlpStatusLine" title="Click to check for updates"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
         <div class="status-line"><span class="status-dot" id="ffmpegDot"></span><span id="ffmpegText">Checking ffmpeg…</span></div>
         <div class="status-line"><span class="status-dot" id="jsRuntimeDot"></span><span id="jsRuntimeText">Checking JS runtime…</span></div>
-        <button class="small-btn update-btn" id="ytdlpUpdateBtn" hidden>Update</button>
+        <div class="sidebar-btn-row">
+          <button class="small-btn update-btn" id="ytdlpUpdateBtn" hidden>Update</button>
+          <button class="small-btn update-btn" id="ytdlpCacheBtn" title="yt-dlp --rm-cache-dir — the usual first step for 403s and signature errors">Clear cache</button>
+        </div>
         <div class="status-line" id="configStatusLine" hidden><span class="status-dot err"></span><span id="configStatusText"></span></div>
       </div>
     </div>
@@ -1201,13 +1217,14 @@
   });
 
   // Advanced sub-navigation (one category visible at a time, independent scroll)
+  function showAdvancedCategory(name) {
+    document.querySelectorAll('#advancedNav .nav-item').forEach(i => i.classList.toggle('active', i.dataset.adv === name));
+    document.querySelectorAll('.adv-category').forEach(c => c.classList.toggle('active', c.id === 'adv-' + name));
+  }
+
   document.getElementById('advancedNav').addEventListener('click', (e) => {
     const item = e.target.closest('.nav-item');
-    if (!item) return;
-    document.querySelectorAll('#advancedNav .nav-item').forEach(i => i.classList.remove('active'));
-    document.querySelectorAll('.adv-category').forEach(c => c.classList.remove('active'));
-    item.classList.add('active');
-    document.getElementById('adv-' + item.dataset.adv).classList.add('active');
+    if (item) showAdvancedCategory(item.dataset.adv);
   });
 
   // Quality preset
@@ -1439,7 +1456,21 @@
   function setQueueActive(active) {
     downloading = active;
     ytdlpUpdateBtn.disabled = active || updating;
+    ytdlpCacheBtn.disabled = active || updating;
   }
+
+  const ytdlpCacheBtn = document.getElementById('ytdlpCacheBtn');
+  ytdlpCacheBtn.addEventListener('click', async () => {
+    if (ytdlpCacheBtn.disabled) return;
+    ytdlpCacheBtn.disabled = true;
+    switchTab('log');
+    try {
+      const r = await window.pywebview.api.clear_ytdlp_cache();
+      if (!r.ok) appendLog(`Couldn't clear the cache: ${r.error}`, 'err-line');
+    } finally {
+      ytdlpCacheBtn.disabled = downloading || updating;
+    }
+  });
 
   // Last known jobs by id, so progress/title events can patch rows in place
   // and a full re-render (on ytdlp-queue) doesn't lose the live meta text.
@@ -1472,6 +1503,8 @@
       main.appendChild(bar);
     }
 
+    if (job.status === 'failed' && job.hint) main.appendChild(hintRow(job));
+
     const status = document.createElement('span');
     status.className = `queue-status s-${job.status}`;
     status.textContent = STATUS_LABEL[job.status] || job.status;
@@ -1486,8 +1519,48 @@
       else window.pywebview.api.remove_download(job.id);
     });
 
-    row.append(main, status, x);
+    row.append(main, status);
+    if (job.status === 'failed' || job.status === 'cancelled') {
+      const retry = document.createElement('button');
+      retry.className = 'small-btn queue-retry';
+      retry.textContent = 'Retry';
+      retry.title = 'Queue it again with the same settings';
+      retry.addEventListener('click', () => window.pywebview.api.retry_download(job.id));
+      row.appendChild(retry);
+    }
+    row.appendChild(x);
     return row;
+  }
+
+  // The fix for each hint action: where the app's own control for it lives.
+  const HINT_ACTIONS = {
+    cookies: [['Use browser cookies', () => { switchTab('advanced'); showAdvancedCategory('auth'); }]],
+    extra:   [['Edit extra arguments', () => { switchTab('advanced'); showAdvancedCategory('extra'); }]],
+    update:  [['Update yt-dlp', () => { if (!ytdlpUpdateBtn.hidden) ytdlpUpdateBtn.click(); else checkForUpdate(true); }],
+              ['Clear cache', () => ytdlpCacheBtn.click()]],
+    formats: [['Pick a format', (job) => {
+      urlInput.value = job.url;
+      openFormatsOnPreview = job.url;   // the table opens once the lookup lands
+      switchTab('download');
+      schedulePreview();
+      urlInput.scrollIntoView();
+    }]],
+  };
+
+  function hintRow(job) {
+    const el = document.createElement('div');
+    el.className = 'queue-hint';
+    const text = document.createElement('span');
+    text.textContent = job.hint.text;
+    el.appendChild(text);
+    (HINT_ACTIONS[job.hint.action] || []).forEach(([label, fn]) => {
+      const b = document.createElement('button');
+      b.className = 'small-btn';
+      b.textContent = label;
+      b.addEventListener('click', () => fn(job));
+      el.appendChild(b);
+    });
+    return el;
   }
 
   let lastJobs = [];
@@ -1627,6 +1700,7 @@
   let previewUrl = null;       // what the current card describes
   let previewFormatRows = [];
   let previewEntryRows = [];   // playlist entries, in playlist order
+  let openFormatsOnPreview = null;   // URL whose Formats table should open as soon as its preview renders
   let previewPicked = new Set();   // indices into previewEntryRows the user has ticked
 
   function looksLikeUrl(s) {
@@ -1688,6 +1762,10 @@
     previewEntryRows = info.kind === 'playlist' ? (info.entries || []) : [];
     previewPicked = new Set(previewEntryRows.map((_, i) => i));   // everything on, as a plain playlist download would be
     renderEntryRows();
+    if (openFormatsOnPreview && openFormatsOnPreview === previewUrl && previewFormatRows.length) {
+      previewFormats.hidden = false;
+    }
+    openFormatsOnPreview = null;
   }
 
   // --- Playlist picker ------------------------------------------------------
