@@ -413,6 +413,8 @@
     color: var(--text-dim);
   }
   .queue-actions { display: flex; gap: 6px; }
+  .queue-stats { font-size: 11px; color: var(--text-dim); margin-left: 10px; font-variant-numeric: tabular-nums; }
+  .queue-stats .paused { color: #ffd60a; }
   .queue-list {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -713,8 +715,9 @@
 
         <div class="queue-section">
           <div class="queue-header">
-            <span class="queue-title">Queue</span>
+            <span><span class="queue-title">Queue</span><span class="queue-stats" id="queueStats"></span></span>
             <div class="queue-actions">
+              <button class="small-btn" id="pauseBtn" hidden>Pause</button>
               <button class="small-btn" id="cancelAllBtn" hidden>Cancel all</button>
               <button class="small-btn" id="clearFinishedBtn" hidden>Clear finished</button>
             </div>
@@ -1629,6 +1632,17 @@
     });
 
     row.append(main, status);
+    if (job.status === 'done' && job.files && job.files.length) {
+      const reveal = document.createElement('button');
+      reveal.className = 'small-btn queue-retry';
+      reveal.textContent = 'Reveal';
+      reveal.title = job.files.length > 1 ? `Show the first of ${job.files.length} files` : 'Show in the file manager';
+      reveal.addEventListener('click', async () => {
+        const r = await window.pywebview.api.reveal(job.files[0]);
+        if (!r.ok) { reveal.textContent = r.error; setTimeout(() => { reveal.textContent = 'Reveal'; }, 2500); }
+      });
+      row.appendChild(reveal);
+    }
     if (job.status === 'failed' || job.status === 'cancelled') {
       const retry = document.createElement('button');
       retry.className = 'small-btn queue-retry';
@@ -1673,8 +1687,14 @@
   }
 
   let lastJobs = [];
-  function renderQueue(jobs) {
+  let queuePaused = false;
+  const jobSpeed = new Map();   // bytes/s per running job, from ytdlp-progress
+  const pauseBtn = document.getElementById('pauseBtn');
+  const queueStats = document.getElementById('queueStats');
+
+  function renderQueue(jobs, paused) {
     lastJobs = jobs;
+    if (paused !== undefined) queuePaused = paused;
     queueList.innerHTML = '';
     if (!jobs.length) {
       const empty = document.createElement('div');
@@ -1688,10 +1708,32 @@
     const anyFinished = jobs.some(j => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled');
     cancelAllBtn.hidden = !anyActive;
     clearFinishedBtn.hidden = !anyFinished;
+    pauseBtn.hidden = !anyActive;
+    pauseBtn.textContent = queuePaused ? 'Resume' : 'Pause';
     setQueueActive(anyActive);
     // forget meta for rows that no longer exist
     const ids = new Set(jobs.map(j => j.id));
     for (const id of jobMeta.keys()) if (!ids.has(id)) jobMeta.delete(id);
+    for (const id of jobSpeed.keys()) if (!ids.has(id)) jobSpeed.delete(id);
+    renderQueueStats();
+    const running = jobs.filter(j => j.status === 'running').length;
+    window.pywebview.api.set_title(running ? `yt-dlp — ${running} downloading` : 'yt-dlp');
+  }
+
+  pauseBtn.addEventListener('click', () => window.pywebview.api.set_paused(!queuePaused));
+
+  function renderQueueStats() {
+    const running = lastJobs.filter(j => j.status === 'running');
+    const queued = lastJobs.filter(j => j.status === 'queued').length;
+    const bits = [];
+    if (queuePaused && (running.length || queued)) bits.push('<span class="paused">paused</span>');
+    if (running.length) {
+      let total = 0;
+      running.forEach(j => { total += jobSpeed.get(j.id) || 0; });
+      bits.push(`${running.length} downloading${total ? ' · ' + formatSpeed(total) : ''}`);
+    }
+    if (queued) bits.push(`${queued} waiting`);
+    queueStats.innerHTML = bits.join(' · ');
   }
 
   function rowFor(jobId) {
@@ -2228,7 +2270,7 @@
   cancelAllBtn.addEventListener('click', () => window.pywebview.api.cancel_all());
   clearFinishedBtn.addEventListener('click', () => window.pywebview.api.clear_finished());
 
-  window.addEventListener('ytdlp-queue', (e) => renderQueue(e.detail.jobs));
+  window.addEventListener('ytdlp-queue', (e) => renderQueue(e.detail.jobs, e.detail.paused));
 
   window.addEventListener('ytdlp-log', (e) => {
     // With parallel downloads the log interleaves; tag lines by job only
@@ -2248,6 +2290,8 @@
     const { jobId, pct, size, speed, eta } = e.detail;
     const meta = `${pct.toFixed(1)}%${size ? ' of ' + size : ''}${speed ? ' · ' + speed : ''}${eta ? ' · ETA ' + eta : ''}`;
     jobMeta.set(jobId, meta);
+    jobSpeed.set(jobId, parseSpeed(speed));
+    renderQueueStats();
     const row = rowFor(jobId);
     if (!row) return;
     row.querySelector('.queue-meta').textContent = meta;
@@ -2305,7 +2349,14 @@
     syncSponsorBlockUI();
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
-    try { renderQueue(await window.pywebview.api.queue_snapshot()); } catch (err) {}
+    try {
+      const state = await window.pywebview.api.queue_state();
+      renderQueue(state.jobs, state.paused);
+      if (state.restored) {
+        appendLog(`Restored ${state.restored} unfinished download${state.restored === 1 ? '' : 's'} from last time — the queue is paused; press Resume to continue.`, 'ok-line');
+        queueStats.innerHTML = `<span class="paused">${state.restored} restored from last time — paused</span>`;
+      }
+    } catch (err) {}
     refreshHistory();
 
     try {

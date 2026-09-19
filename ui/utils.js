@@ -43,6 +43,21 @@ function settingsFingerprint(defaults, settings, destFolder) {
   return JSON.stringify({ settings: merged, destFolder: destFolder || '' });
 }
 
+// "1.23MiB/s" -> bytes per second, as yt-dlp prints it; 0 if unparseable.
+function parseSpeed(text) {
+  const m = /^([\d.]+)\s*([KMGT]?i?)B\/s$/i.exec((text || '').trim());
+  if (!m) return 0;
+  const units = { '': 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 };
+  return parseFloat(m[1]) * (units[m[2].replace(/i/i, '').toUpperCase()] || 1);
+}
+
+function formatSpeed(bps) {
+  const units = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'];
+  let i = 0;
+  while (bps >= 1024 && i < units.length - 1) { bps /= 1024; i++; }
+  return `${bps.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { getPath, setPath, deepMerge, settingsFingerprint };
+  module.exports = { getPath, setPath, deepMerge, settingsFingerprint, parseSpeed, formatSpeed };
 }

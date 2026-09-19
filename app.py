@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import sys
 import threading
+import time
 import re
 import urllib.parse
 import urllib.request
@@ -652,6 +653,9 @@ class DownloadQueue:
         self._lock = threading.Lock()
         self._max_concurrent = max(1, int(max_concurrent))
         self._next_id = 1
+        self._paused = False
+        self._inflight = 0     # _run_one calls in progress, incl. their post-status hooks
+        self.persist = None   # persist(pending_items) after every change, if set
 
     # --- public API -------------------------------------------------------
 
@@ -741,9 +745,45 @@ class DownloadQueue:
         with self._lock:
             return [self._public(j) for j in self._jobs]
 
+    def state(self):
+        """What the UI renders from: the jobs plus whether dispatch is paused."""
+        with self._lock:
+            return {"jobs": [self._public(j) for j in self._jobs], "paused": self._paused}
+
+    def set_paused(self, paused):
+        """Paused: nothing new starts; whatever is running finishes.
+        Resuming dispatches immediately."""
+        with self._lock:
+            self._paused = bool(paused)
+        self._emit_queue()
+        if not paused:
+            self._dispatch()
+
+    def pending(self):
+        """What a restart should pick up again: everything not yet finished,
+        as enqueue() items with their own settings and folder. A running
+        job counts too — yt-dlp resumes its .part file."""
+        with self._lock:
+            return [{"url": j["url"], "title": j["title"], "section": j.get("section"),
+                     "settings": j["settings"], "dest": j["dest"]}
+                    for j in self._jobs if j["status"] in ("queued", "running")]
+
     def is_active(self):
         with self._lock:
             return any(j["status"] in ("queued", "running") for j in self._jobs)
+
+    def wait_idle(self, timeout=5.0):
+        """True once nothing is queued or running *and* every worker has
+        finished its post-status work (the done event, notification and
+        history write happen after the status flips). Tests rely on this;
+        the app itself only needs is_active()."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._lock:
+                if self._inflight == 0 and not any(j["status"] in ("queued", "running") for j in self._jobs):
+                    return True
+            time.sleep(0.01)
+        return False
 
     def get(self, job_id):
         """A copy of one job's full record (settings, files, ...) — what the
@@ -770,7 +810,7 @@ class DownloadQueue:
         return next((j for j in self._jobs if j["id"] == job_id), None)
 
     def _public(self, job):
-        return {k: job[k] for k in ("id", "url", "status", "title", "pct", "code", "hint", "section")}
+        return {k: job[k] for k in ("id", "url", "status", "title", "pct", "code", "hint", "section", "files")}
 
     def retry(self, job_id):
         """A fresh job with the same url/title/settings/dest as a finished
@@ -786,7 +826,12 @@ class DownloadQueue:
         return ids[0] if ids else None
 
     def _emit_queue(self):
-        self._emit("ytdlp-queue", {"jobs": self.snapshot()})
+        self._emit("ytdlp-queue", self.state())
+        if self.persist:
+            try:
+                self.persist(self.pending())
+            except Exception:
+                pass   # a full disk must not stall the worker thread
 
     def _cancel_locked(self, job):
         job["cancel"] = True
@@ -800,6 +845,8 @@ class DownloadQueue:
         anything that could free a slot or add work."""
         to_start = []
         with self._lock:
+            if self._paused:
+                return
             running = sum(1 for j in self._jobs if j["status"] == "running")
             active = running + sum(1 for j in self._jobs if j["status"] == "queued")
             for job in self._jobs:
@@ -817,6 +864,15 @@ class DownloadQueue:
             threading.Thread(target=self._run_one, args=(job,), daemon=True).start()
 
     def _run_one(self, job):
+        with self._lock:
+            self._inflight += 1
+        try:
+            self._run_one_inner(job)
+        finally:
+            with self._lock:
+                self._inflight -= 1
+
+    def _run_one_inner(self, job):
         try:
             code = self._runner(job, self._emit)
         except Exception as e:
@@ -1214,6 +1270,35 @@ def history_entry(job, now=None):
     }
 
 
+# --- queue persistence --------------------------------------------------------------
+# Whatever hasn't finished is written after every queue change, and picked
+# up again — paused, so nothing starts unasked — on the next launch.
+
+def queue_path():
+    return config_path("queue.json")
+
+
+def write_queue(items):
+    if not items:
+        try:
+            os.remove(queue_path())
+        except FileNotFoundError:
+            pass
+        return
+    with open(queue_path(), "w") as f:
+        json.dump({"items": items}, f, indent=2)
+
+
+def load_queue():
+    try:
+        with open(queue_path()) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    items = data.get("items") if isinstance(data, dict) else None
+    return [i for i in (items or []) if isinstance(i, dict) and isinstance(i.get("url"), str) and i["url"].strip()]
+
+
 # --- download archive ---------------------------------------------------------------
 # yt-dlp skips anything listed in --download-archive FILE, one
 # "<extractor> <id>" per line. The history already knows every finished
@@ -1307,6 +1392,38 @@ class Api:
         self._history_lock = threading.Lock()   # parallel jobs can finish together
         self._info_lock = threading.Lock()
         self._info_proc = None                   # the in-flight preview lookup, if any
+        self.queue.persist = self._persist_queue
+        self.restored = 0                        # jobs picked up from the last run, for the UI's notice
+
+    def _persist_queue(self, items):
+        try:
+            write_queue(items)
+        except OSError:
+            pass
+
+    def restore_queue(self):
+        """Re-queue what the last run left unfinished — paused, so the user
+        decides when it starts. Each item carries its own settings/folder."""
+        items = load_queue()
+        if not items:
+            return 0
+        self.queue.set_paused(True)
+        for item in items:
+            self.queue.enqueue([item], item.get("settings") or {}, item.get("dest") or os.path.expanduser("~/Downloads"))
+        self.restored = len(items)
+        return self.restored
+
+    def set_paused(self, paused):
+        self.queue.set_paused(paused)
+        return True
+
+    def set_title(self, text):
+        if self.window:
+            try:
+                self.window.set_title(text)
+            except Exception:
+                pass
+        return True
 
     def set_window(self, window):
         self.window = window
@@ -1641,6 +1758,12 @@ class Api:
     def queue_snapshot(self):
         return self.queue.snapshot()
 
+    def queue_state(self):
+        state = self.queue.state()
+        state["restored"] = self.restored
+        self.restored = 0   # a one-time notice
+        return state
+
     def _emit(self, event, payload):
         if self.window:
             js = f"window.dispatchEvent(new CustomEvent('{event}', {{detail: {json.dumps(payload)}}}))"
@@ -1796,6 +1919,7 @@ def main():
         entry += "?url=" + urllib.parse.quote(initial_url, safe="")
 
     api = Api()
+    api.restore_queue()
     server = InstanceServer(api.add_urls)
     try:
         server.start()

@@ -16,6 +16,25 @@ def isolated_config_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)   # the instance socket then lands under the temp config dir too
 
 
+@pytest.fixture(autouse=True)
+def drain_queues(monkeypatch):
+    """A job's done/notify/history hooks run on its worker thread after
+    the status flips, so a test that returns the moment its queue looks
+    idle can leave a history write racing the env restore — and landing
+    in the real ~/.config. Wait for every queue the test created."""
+    import app
+    queues = []
+    original = app.DownloadQueue.__init__
+
+    def tracking_init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        queues.append(self)
+    monkeypatch.setattr(app.DownloadQueue, "__init__", tracking_init)
+    yield
+    for q in queues:
+        q.wait_idle(5)
+
+
 @pytest.fixture
 def sock_path():
     """A Unix socket path short enough for macOS's ~104-byte limit —

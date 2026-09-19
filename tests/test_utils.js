@@ -3,7 +3,7 @@
 // Run with: node --test tests/test_utils.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getPath, setPath, deepMerge, settingsFingerprint } = require('../ui/utils.js');
+const { getPath, setPath, deepMerge, settingsFingerprint, parseSpeed, formatSpeed } = require('../ui/utils.js');
 
 test('getPath reads a nested value', () => {
   const obj = { audio: { extractAudio: true } };
@@ -89,4 +89,21 @@ test('settingsFingerprint does not mutate the defaults', () => {
   const defaults = { preset: 'best', auth: { password: '' } };
   settingsFingerprint(defaults, { preset: 'audio', auth: { password: 'p' } }, '');
   assert.deepEqual(defaults, { preset: 'best', auth: { password: '' } });
+});
+
+test('parseSpeed reads yt-dlp speed strings', () => {
+  assert.equal(parseSpeed('1.50MiB/s'), 1.5 * 1024 ** 2);
+  assert.equal(parseSpeed('512.00KiB/s'), 512 * 1024);
+  assert.equal(parseSpeed('2.00GiB/s'), 2 * 1024 ** 3);
+  assert.equal(parseSpeed('900B/s'), 900);
+  assert.equal(parseSpeed('Unknown B/s'), 0);
+  assert.equal(parseSpeed(''), 0);
+  assert.equal(parseSpeed(undefined), 0);
+});
+
+test('formatSpeed picks a sensible unit', () => {
+  assert.equal(formatSpeed(900), '900 B/s');
+  assert.equal(formatSpeed(1.5 * 1024 ** 2), '1.5 MiB/s');
+  assert.equal(formatSpeed(3 * 1024 ** 3), '3.0 GiB/s');
+  assert.equal(formatSpeed(parseSpeed('1.50MiB/s') + parseSpeed('512.00KiB/s')), '2.0 MiB/s');
 });
