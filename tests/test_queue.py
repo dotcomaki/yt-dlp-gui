@@ -414,7 +414,10 @@ def test_default_is_sequential():
 
 
 def test_max_concurrent_bounds_in_flight_jobs():
-    runner = Overlap()
+    # Holds long enough that "overlapped" (~2×hold) and "serialized"
+    # (4×hold) stay apart even on a loaded CI runner, which has been seen
+    # stretching a 0.6s serial run to 0.68s.
+    runner = Overlap(hold=0.4)
     q = app.DownloadQueue(Emit(), runner, max_concurrent=2)
     t = time.time()
     q.enqueue(["a", "b", "c", "d"], {}, "/dl")
@@ -426,7 +429,7 @@ def test_max_concurrent_bounds_in_flight_jobs():
     # (CI saw [1, 2, 4, 3]). Strict ordering is covered by the sequential
     # test; here only "everything ran" is a valid claim.
     assert sorted(runner.started) == [1, 2, 3, 4]
-    assert elapsed < 4 * runner.hold                  # actually overlapped, not serialized
+    assert elapsed < 3.5 * runner.hold                # overlapped (~0.8s), not serialized (1.6s)
     assert [j["status"] for j in q.snapshot()] == ["done"] * 4
 
 
