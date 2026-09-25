@@ -70,13 +70,10 @@ class Emit:
         self.events.append((event, payload))
 
 
-def idle(q, timeout=5):
-    t = time.time()
-    while time.time() - t < timeout:
-        if not q.is_active():
-            return True
-        time.sleep(0.02)
-    return False
+def idle(q, timeout=10):
+    """wait_idle, not is_active: the done event, the notification and the
+    history write all run after the status flips."""
+    return q.wait_idle(timeout)
 
 
 def test_failed_job_carries_a_hint_and_successful_one_does_not():

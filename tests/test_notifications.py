@@ -72,13 +72,10 @@ def make_api(runner, **settings_overrides):
     return api, sent
 
 
-def idle(q, timeout=5):
-    t = time.time()
-    while time.time() - t < timeout:
-        if not q.is_active():
-            return True
-        time.sleep(0.02)
-    return False
+def idle(q, timeout=10):
+    """wait_idle, not is_active: the done event, the notification and the
+    history write all run after the status flips."""
+    return q.wait_idle(timeout)
 
 
 def test_single_download_notifies_once_with_its_title():
