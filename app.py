@@ -1699,6 +1699,22 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def save_log(self, text):
+        result = self.window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            save_filename="ytdlp-gui-log.txt",
+            file_types=("Text files (*.txt)", "All files (*.*)"),
+        )
+        dest = result[0] if result else None
+        if not dest:
+            return {"ok": False, "cancelled": True}
+        try:
+            with open(dest, "w") as f:
+                f.write(text)
+            return {"ok": True, "path": dest}
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+
     def import_settings(self):
         result = self.window.create_file_dialog(
             webview.FileDialog.OPEN,

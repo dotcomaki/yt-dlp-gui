@@ -31,6 +31,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
     font-size: 13px;
     overflow: hidden;
+    -webkit-user-select: none;
     user-select: none;
   }
 
@@ -171,6 +172,7 @@
     font-size: 12.5px;
     outline: none;
     font-family: inherit;
+    -webkit-user-select: text;
     user-select: text;
   }
   input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus,
@@ -258,6 +260,8 @@
   }
   .log-toolbar .spacer { flex: 1; }
   .log-toolbar .hint-inline { font-size: 11px; }
+  .log-toolbar select { width: auto; max-width: 190px; padding: 4px 7px; font-size: 11px; }
+  .log-toolbar label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); cursor: pointer; }
   .actions {
     display: flex;
     gap: 8px;
@@ -466,6 +470,8 @@
   .queue-main { flex: 1; min-width: 0; }
   .queue-name {
     font-size: 12.5px;
+    -webkit-user-select: text;
+    user-select: text;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -475,6 +481,8 @@
   .queue-meta {
     font-size: 11px;
     color: var(--text-dim);
+    -webkit-user-select: text;
+    user-select: text;
     margin-top: 2px;
     min-height: 13px;
   }
@@ -658,6 +666,7 @@
     font-size: 11px;
     line-height: 1.6;
     color: #b0b0b3;
+    -webkit-user-select: text;
     user-select: text;
   }
   .log .err-line { color: var(--danger); }
@@ -1375,8 +1384,11 @@
       <div class="panel" id="tab-log">
         <h2>Log</h2>
         <div class="log-toolbar">
+          <select id="logFilter" title="Show only one download's output"><option value="">All output</option></select>
           <button class="small-btn" id="logCopyBtn">Copy</button>
+          <button class="small-btn" id="logSaveBtn">Save…</button>
           <button class="small-btn" id="logClearBtn">Clear</button>
+          <label title="Keep scrolling to the newest line"><input type="checkbox" id="logFollow" checked /> Follow</label>
           <span class="spacer"></span>
           <span class="hint-inline" id="logNote"></span>
         </div>
@@ -1747,30 +1759,85 @@
   let logDropped = 0;
   const logNote = document.getElementById('logNote');
 
-  function appendLog(text, cls) {
+  const logFilter = document.getElementById('logFilter');
+  const logFollow = document.getElementById('logFollow');
+
+  function appendLog(text, cls, jobId) {
     if (!logStarted) { logBox.innerHTML = ''; logStarted = true; logDropped = 0; logNote.textContent = ''; }
     const line = document.createElement('div');
     if (cls) line.className = cls;
+    if (jobId != null) line.dataset.job = jobId;
     line.textContent = text;
+    line.hidden = !lineMatchesFilter(line);
     logBox.appendChild(line);
     while (logBox.childElementCount > LOG_MAX_LINES) {
       logBox.removeChild(logBox.firstElementChild);
       logDropped++;
     }
     if (logDropped) logNote.textContent = `${logDropped.toLocaleString()} older lines dropped`;
-    logBox.scrollTop = logBox.scrollHeight;
+    if (logFollow.checked) logBox.scrollTop = logBox.scrollHeight;
   }
+
+  function lineMatchesFilter(line) {
+    return !logFilter.value || line.dataset.job === logFilter.value;
+  }
+
+  function applyLogFilter() {
+    Array.from(logBox.children).forEach(line => { line.hidden = !lineMatchesFilter(line); });
+    if (logFollow.checked) logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  // The filter lists the jobs that have actually said something, newest last.
+  function refreshLogFilter() {
+    const ids = new Set(Array.from(logBox.children).map(l => l.dataset.job).filter(Boolean));
+    const known = new Map(lastJobs.map(j => [String(j.id), j.title || j.url]));
+    const wanted = [...ids].sort((a, b) => Number(a) - Number(b));
+    const labels = wanted.map(id => `#${id} ${known.get(id) || ''}`.trim().slice(0, 44));
+    // Titles arrive after the first log lines do, so compare the labels
+    // too — otherwise the list stays stuck on the URLs.
+    const current = Array.from(logFilter.options).slice(1);
+    if (current.map(o => o.value).join() === wanted.join() &&
+        current.map(o => o.textContent).join() === labels.join()) return;
+    const chosen = logFilter.value;
+    logFilter.length = 1;
+    wanted.forEach((id, i) => logFilter.add(new Option(labels[i], id)));
+    logFilter.value = wanted.includes(chosen) ? chosen : '';
+  }
+
+  function visibleLogText() {
+    return Array.from(logBox.children).filter(el => !el.hidden).map(el => el.textContent).join('\n');
+  }
+
+  logFilter.addEventListener('change', applyLogFilter);
+
+  // Scrolling up is how people read a log that's still moving, so treat it
+  // as "stop following" rather than fighting them for the scrollbar.
+  logBox.addEventListener('scroll', () => {
+    const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 24;
+    if (!atBottom && logFollow.checked) logFollow.checked = false;
+    else if (atBottom && !logFollow.checked) logFollow.checked = true;
+  });
+
+  document.getElementById('logSaveBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('logSaveBtn');
+    const result = await window.pywebview.api.save_log(visibleLogText());
+    if (result.cancelled) return;
+    btn.textContent = result.ok ? 'Saved' : 'Failed';
+    if (!result.ok) appendLog(`Couldn't save the log: ${result.error}`, 'err-line');
+    setTimeout(() => { btn.textContent = 'Save…'; }, 1800);
+  });
 
   document.getElementById('logClearBtn').addEventListener('click', () => {
     logBox.innerHTML = '';
     logStarted = true;
     logDropped = 0;
     logNote.textContent = '';
+    refreshLogFilter();
   });
 
   document.getElementById('logCopyBtn').addEventListener('click', async () => {
-    const text = Array.from(logBox.children).map(el => el.textContent).join('\n');
     const btn = document.getElementById('logCopyBtn');
+    const text = visibleLogText();
     try {
       await navigator.clipboard.writeText(text);
       btn.textContent = 'Copied';
@@ -1938,6 +2005,7 @@
     for (const id of jobSpeed.keys()) if (!ids.has(id)) jobSpeed.delete(id);
     for (const id of [...indeterminate]) if (!ids.has(id)) indeterminate.delete(id);
     renderQueueStats();
+    refreshLogFilter();
     const running = jobs.filter(j => j.status === 'running').length;
     window.pywebview.api.set_title(running ? `yt-dlp — ${running} downloading` : 'yt-dlp');
   }
@@ -2630,7 +2698,8 @@
     // stays exactly as it always was.
     const { jobId, line } = e.detail;
     const running = lastJobs.filter(j => j.status === 'running').length;
-    appendLog(jobId != null && running > 1 ? `#${jobId}  ${line}` : line);
+    appendLog(jobId != null && running > 1 ? `#${jobId}  ${line}` : line, null, jobId);
+    refreshLogFilter();
   });
 
   window.addEventListener('ytdlp-title', (e) => {
