@@ -258,6 +258,25 @@ def history_path():
     return config_path("history.json")
 
 
+# This app's own version, and where its releases are announced. Bumped
+# when a release is cut; CI checks the tag and this agree.
+VERSION = "1.5.0"
+APP_RELEASES_API = "https://api.github.com/repos/dotcomaki/yt-dlp-gui/releases/latest"
+
+
+def fetch_app_release(timeout=5):
+    """(tag, html_url) of this app's latest release, for the "there's a
+    newer version" line. Nothing is downloaded or installed — updating a
+    source checkout is `git pull`, which isn't ours to do."""
+    req = urllib.request.Request(
+        APP_RELEASES_API,
+        headers={"User-Agent": "yt-dlp-gui", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
+        data = json.load(resp)
+    return data.get("tag_name"), data.get("html_url")
+
+
 # yt-dlp publishes its channels as separate repositories; the update check
 # has to look at the one the user actually follows, or every nightly build
 # looks "newer" than stable and vice versa.
@@ -1900,6 +1919,41 @@ class Api:
             except (OSError, subprocess.SubprocessError):
                 pass
         return {"ok": True, "status": native_host_status()}
+
+    def check_app_update(self):
+        """{"ok", "current", "latest", "url", "updateAvailable"} — silent
+        about failures, like the yt-dlp check: offline is not an error."""
+        try:
+            tag, url = fetch_app_release()
+        except Exception:
+            return {"ok": False}
+        if not tag:
+            return {"ok": False}
+        latest = tag.lstrip("vV")
+        return {
+            "ok": True,
+            "current": VERSION,
+            "latest": latest,
+            "url": url or "",
+            "updateAvailable": is_newer(latest, VERSION),
+        }
+
+    def open_external(self, url):
+        """Open a link in the real browser. Only https, and only a link the
+        app itself produced — nothing here takes a URL from a page."""
+        if not isinstance(url, str) or not url.startswith("https://"):
+            return {"ok": False, "error": "refusing to open a non-https link"}
+        opener = ["open", url] if sys.platform == "darwin" else None
+        if opener is None:
+            xdg = shutil.which("xdg-open")
+            if not xdg:
+                return {"ok": False, "error": "no xdg-open"}
+            opener = [xdg, url]
+        try:
+            subprocess.Popen(opener)
+            return {"ok": True}
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
 
     def ytdlp_config_files(self):
         """The config files yt-dlp would read, that actually exist — so the

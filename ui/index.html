@@ -746,6 +746,7 @@
           <button class="small-btn update-btn" id="ytdlpCacheBtn" title="yt-dlp --rm-cache-dir — the usual first step for 403s and signature errors">Clear cache</button>
         </div>
         <div class="status-line" id="configStatusLine" hidden><span class="status-dot err"></span><span id="configStatusText"></span></div>
+        <div class="status-line status-line-clickable" id="appUpdateLine" hidden title="Open the release page"><span class="status-dot warn"></span><span id="appUpdateText"></span></div>
         <div class="status-line" id="hostStatusLine" hidden><span class="status-dot warn"></span><span id="hostStatusText"></span></div>
         <button class="small-btn update-btn" id="hostFixBtn" hidden>Re-link extension</button>
       </div>
@@ -2416,6 +2417,9 @@
     }];
   }
 
+  const appUpdateLine = document.getElementById('appUpdateLine');
+  const appUpdateText = document.getElementById('appUpdateText');
+
   // --- Native host re-link -------------------------------------------------------
   const hostStatusLine = document.getElementById('hostStatusLine');
   const hostStatusText = document.getElementById('hostStatusText');
@@ -2941,6 +2945,18 @@
         note.className = 'hint';
         note.textContent = `Found on this machine: ${configs.join(', ')}`;
         document.getElementById('configFileHint').after(note);
+      }
+    } catch (err) {}
+
+    // This app's own releases — a note and a link, never an auto-update:
+    // updating a checkout is git pull, which isn't the app's business.
+    try {
+      const mine = await window.pywebview.api.check_app_update();
+      if (mine.ok && mine.updateAvailable) {
+        appUpdateText.textContent = `yt-dlp GUI ${mine.latest} available`;
+        appUpdateLine.hidden = false;
+        appUpdateLine.title = `You're on ${mine.current} — click to open the release notes`;
+        appUpdateLine.addEventListener('click', () => window.pywebview.api.open_external(mine.url));
       }
     } catch (err) {}
 

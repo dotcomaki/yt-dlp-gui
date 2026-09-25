@@ -114,6 +114,7 @@ Firefox needs its own extension folder (`firefox-extension/`) since its manifest
 - URLs sent from the browser extension while the app is open are added to the box (Advanced → Notifications → *Browser extension* to have them start downloading immediately instead)
 - Desktop notification when the queue finishes (Advanced → Notifications, on by default) — one per batch with finished/failed counts, or the title when it's a single download. macOS via Notification Center; Linux needs `notify-send`.
 
+- The sidebar mentions it when a newer release of this app exists, linking to the notes — a note only; updating a checkout is `git pull` (or re-extracting the release), which the app won't do behind your back
 - **Light theme** (Advanced → Appearance): follow the system, or pin dark or light. The window frame's own colour is chosen at launch from the same setting, so there's no flash of the wrong theme.
 
 ## Keyboard shortcuts

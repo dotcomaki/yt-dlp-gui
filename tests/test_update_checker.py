@@ -382,3 +382,67 @@ def test_update_runs_the_channel_the_settings_ask_for(monkeypatch):
     api._emit = lambda ev, payload: None
     api._run_update(app.update_channel({"debug": {"updateChannel": "master"}}))
     assert seen == ["master"]
+
+
+# --- the app's own releases (#36) --------------------------------------------------
+
+def test_app_update_compares_against_its_own_version(monkeypatch):
+    monkeypatch.setattr(app, "VERSION", "1.5.0")
+    monkeypatch.setattr(app, "fetch_app_release", lambda timeout=5: ("v1.6.0", "https://github.com/x/releases/tag/v1.6.0"))
+    assert app.Api().check_app_update() == {
+        "ok": True, "current": "1.5.0", "latest": "1.6.0",
+        "url": "https://github.com/x/releases/tag/v1.6.0", "updateAvailable": True,
+    }
+
+
+def test_app_update_is_quiet_when_current_or_ahead(monkeypatch):
+    monkeypatch.setattr(app, "VERSION", "1.5.0")
+    monkeypatch.setattr(app, "fetch_app_release", lambda timeout=5: ("v1.5.0", "u"))
+    assert app.Api().check_app_update()["updateAvailable"] is False
+    monkeypatch.setattr(app, "fetch_app_release", lambda timeout=5: ("v1.4.0", "u"))
+    assert app.Api().check_app_update()["updateAvailable"] is False
+
+
+def test_app_update_failures_are_silent(monkeypatch):
+    def offline(timeout=5):
+        raise OSError("no network")
+    monkeypatch.setattr(app, "fetch_app_release", offline)
+    assert app.Api().check_app_update() == {"ok": False}
+    monkeypatch.setattr(app, "fetch_app_release", lambda timeout=5: (None, None))
+    assert app.Api().check_app_update() == {"ok": False}
+
+
+def test_fetch_app_release_reads_tag_and_url(monkeypatch):
+    import io
+    captured = {}
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_urlopen(req, timeout=None, context=None):
+        captured["url"] = req.full_url
+        return FakeResponse(b'{"tag_name": "v1.6.0", "html_url": "https://github.com/x/releases/tag/v1.6.0"}')
+    monkeypatch.setattr(app.urllib.request, "urlopen", fake_urlopen)
+    assert app.fetch_app_release() == ("v1.6.0", "https://github.com/x/releases/tag/v1.6.0")
+    assert captured["url"] == app.APP_RELEASES_API
+
+
+def test_version_looks_like_a_release_tag():
+    assert app.parse_version(app.VERSION) is not None, "VERSION must be numeric dotted, like a release tag"
+
+
+@pytest.mark.parametrize("url,ok", [
+    ("https://github.com/dotcomaki/yt-dlp-gui/releases", True),
+    ("http://example.com", False),
+    ("file:///etc/passwd", False),
+    ("javascript:alert(1)", False),
+    (None, False),
+])
+def test_open_external_only_opens_https(monkeypatch, url, ok):
+    opened = []
+    monkeypatch.setattr(app.subprocess, "Popen", lambda cmd: opened.append(cmd))
+    monkeypatch.setattr(app.sys, "platform", "darwin")
+    result = app.Api().open_external(url)
+    assert result["ok"] is ok
+    assert bool(opened) is ok
