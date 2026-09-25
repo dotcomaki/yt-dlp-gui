@@ -706,6 +706,7 @@
           <div class="preview-entries" id="previewEntries" hidden>
             <div class="preview-entries-head">
               <label><input type="checkbox" id="previewEntriesAll" checked /> All</label>
+              <label class="split" title="Download them as one playlist job instead of one row per video, so %(playlist_index)s and %(playlist)s work in the filename template"><input type="checkbox" id="previewEntriesNumbered" data-bind="playlist.keepNumbering" /> keep playlist numbering</label>
               <span class="count" id="previewEntriesCount"></span>
             </div>
             <div class="preview-entries-list" id="previewEntriesList"></div>
@@ -1315,6 +1316,11 @@
                 <input type="checkbox" id="cb-ignoreErrors" data-bind="debug.ignoreErrors" />
                 <label for="cb-ignoreErrors">Ignore errors and continue</label>
               </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-useConfigFile" data-bind="debug.useConfigFile" />
+                <label for="cb-useConfigFile">Also apply yt-dlp's own config file</label>
+              </div>
+              <div class="hint" id="configFileHint">Off by default: yt-dlp is run with <code>--ignore-config</code> so this app's settings are the whole story. Turn it on if you keep options in a yt-dlp config file — they'll merge with, and can override or double, what the panels say.</div>
             </div>
 
             <div class="adv-category" id="adv-notifications">
@@ -1385,7 +1391,7 @@
     preset: 'best',
     format: { customFormat: '', mergeOutputFormat: 'mp4', remuxVideo: 'none', recodeVideo: 'none', preferFreeFormats: false, forceKeyframesAtCuts: false },
     filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false, trim: '' },
-    playlist: { items: '', noPlaylist: false, maxDownloads: '', skipDownloaded: false, breakOnExisting: false },
+    playlist: { items: '', noPlaylist: false, maxDownloads: '', skipDownloaded: false, breakOnExisting: false, keepNumbering: false },
     live: { fromStart: false, waitForVideo: '' },
     subtitles: { write: false, writeAuto: false, langs: 'en', embed: false, format: '', convert: 'none' },
     thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false, convert: 'none',
@@ -1399,7 +1405,7 @@
     sponsorblock: { mark: false, remove: false, categories: 'all' },
     geo: { disable: false, bypassCountry: '' },
     postrun: { exec: '' },
-    debug: { verbose: false, simulate: false, ignoreErrors: false },
+    debug: { verbose: false, simulate: false, ignoreErrors: false, useConfigFile: false },
     notifications: { enabled: true },
     extension: { autoEnqueue: false },
     extractorArgs: '',
@@ -2037,6 +2043,7 @@
   const previewFormatsBody = document.getElementById('previewFormatsBody');
   const previewEntries = document.getElementById('previewEntries');
   const previewEntriesAll = document.getElementById('previewEntriesAll');
+  const previewEntriesNumbered = document.getElementById('previewEntriesNumbered');
   const previewEntriesCount = document.getElementById('previewEntriesCount');
   const previewEntriesList = document.getElementById('previewEntriesList');
   let previewTimer = null;
@@ -2195,7 +2202,8 @@
 
   function updateEntriesHead() {
     const n = previewPicked.size, total = previewEntryRows.length;
-    previewEntriesCount.textContent = `${n} of ${total} selected`;
+    previewEntriesCount.textContent = `${n} of ${total} selected` +
+      (previewEntriesNumbered.checked && n ? ' · one queue row' : '');
     previewEntriesAll.checked = n === total && total > 0;
     previewEntriesAll.indeterminate = n > 0 && n < total;
   }
@@ -2204,14 +2212,32 @@
     previewPicked = previewEntriesAll.checked ? new Set(previewEntryRows.map((_, i) => i)) : new Set();
     renderEntryRows();
   });
+  previewEntriesNumbered.addEventListener('change', updateEntriesHead);
 
   // The URLs to enqueue for the first line: the ticked playlist entries when
   // the card describes it as a playlist, otherwise the line as typed. If the
   // lookup hasn't finished (or failed), the raw URL goes through as one job
   // and yt-dlp handles the playlist itself, same as before the picker.
+  // What the first line becomes when the card is a playlist: one item per
+  // ticked entry, or — with "keep playlist numbering" — a single job on the
+  // playlist URL restricted to those entries, which is the only way yt-dlp
+  // fills in %(playlist_index)s and friends.
   function pickedEntries(firstUrl) {
     if (!previewEntryRows.length || firstUrl !== previewUrl) return null;
-    return previewEntryRows.filter((_, i) => previewPicked.has(i)).map(e => ({ url: e.url, title: e.title }));
+    const picked = previewEntryRows.filter((_, i) => previewPicked.has(i));
+    if (!picked.length) return [];
+    if (!previewEntriesNumbered.checked) {
+      return picked.map(e => ({ url: e.url, title: e.title }));
+    }
+    const items = picked.map(e => e.index).join(',');
+    const listSettings = JSON.parse(JSON.stringify(settings));
+    listSettings.playlist.items = items;
+    const label = previewTitle.textContent || firstUrl;
+    return [{
+      url: firstUrl,
+      title: `${label} (${picked.length} video${picked.length === 1 ? '' : 's'})`,
+      settings: listSettings,
+    }];
   }
 
   // --- Filename template -------------------------------------------------------
@@ -2678,6 +2704,16 @@
     // After the folder is known — with auto-enqueue on, this starts a download.
     const prefillUrl = new URLSearchParams(window.location.search).get('url');
     if (prefillUrl) receiveUrls([prefillUrl]);
+
+    try {
+      const configs = await window.pywebview.api.ytdlp_config_files();
+      if (configs.length) {
+        const note = document.createElement('div');
+        note.className = 'hint';
+        note.textContent = `Found on this machine: ${configs.join(', ')}`;
+        document.getElementById('configFileHint').after(note);
+      }
+    } catch (err) {}
 
     let ytdlpFound = false;
     try {

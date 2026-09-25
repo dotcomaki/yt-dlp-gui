@@ -706,6 +706,12 @@ def build_args(binary, settings, dest, section=None, slots=None):
     if postrun.get("exec"):
         args += ["--exec", postrun["exec"]]
 
+    # --- yt-dlp's own config files ---
+    # Off by default: a config file silently merging with, or doubling,
+    # what the panels say makes the GUI lie about what it runs.
+    if not debug.get("useConfigFile"):
+        args.append("--ignore-config")
+
     # --- debug / verbosity ---
     if debug.get("verbose"):
         args.append("--verbose")
@@ -776,9 +782,14 @@ class DownloadQueue:
         with self._lock:
             for item in urls:
                 title = section = None
+                job_settings = settings
                 if isinstance(item, dict):
                     title = (item.get("title") or "").strip() or None
                     section = item.get("section") if isinstance(item.get("section"), dict) else None
+                    # An item may bring its own settings — the playlist picker
+                    # uses this to queue one job with its own --playlist-items.
+                    if isinstance(item.get("settings"), dict):
+                        job_settings = item["settings"]
                     item = item.get("url")
                 url = (item or "").strip()
                 if not url:
@@ -787,7 +798,7 @@ class DownloadQueue:
                     "id": self._next_id,
                     "url": url,
                     "dest": dest,
-                    "settings": json.loads(json.dumps(settings)),  # snapshot
+                    "settings": json.loads(json.dumps(job_settings)),  # snapshot
                     "status": "queued",
                     "title": title,
                     "pct": 0,
@@ -1011,16 +1022,57 @@ class DownloadQueue:
         self._dispatch()
 
 
+# Flags that make a -J metadata fetch useless or have side effects, with
+# whether they swallow the following argument. Typed into Extra Arguments
+# they'd otherwise break the preview ("Couldn't fetch info") — or, for
+# --exec, run a command just because the user paused while typing a URL.
+PREVIEW_UNSAFE_FLAGS = {
+    "-F": False, "--list-formats": False, "--list-subs": False, "--list-subtitles": False,
+    "--list-thumbnails": False, "--list-impersonate-targets": False, "--list-extractors": False,
+    "-j": False, "-J": False, "--dump-json": False, "--dump-single-json": False,
+    "--skip-download": False, "--no-simulate": False, "--flat-playlist": False,
+    "--no-flat-playlist": False, "--split-chapters": False,
+    "--print": True, "-O": True, "--print-to-file": True, "--exec": True,
+    "--downloader": True, "--download-sections": True, "--parse-metadata": True,
+}
+
+
+def strip_preview_unsafe(tokens):
+    """Drop the flags above (and their values) from a token list."""
+    out, skip = [], False
+    for token in tokens:
+        if skip:
+            skip = False
+            continue
+        flag = token.split("=", 1)[0]
+        if flag in PREVIEW_UNSAFE_FLAGS:
+            skip = PREVIEW_UNSAFE_FLAGS[flag] and "=" not in token
+            continue
+        out.append(token)
+    return out
+
+
+def preview_settings(settings):
+    """The settings as they should apply to a metadata fetch: cookies,
+    proxy, geo and playlist ranges yes; anything that would change what -J
+    prints, run a command, or skip the lookup entirely, no."""
+    out = dict(settings)
+    out["postrun"] = {}                      # --exec must not fire while typing
+    out["playlist"] = dict(out.get("playlist") or {}, skipDownloaded=False, breakOnExisting=False)
+    out["extraArgs"] = " ".join(shlex.quote(t) for t in strip_preview_unsafe(shlex.split(settings.get("extraArgs") or "")))
+    return out
+
+
 def info_args(binary, settings, dest, url):
     """argv for a metadata-only fetch. Reuses build_args so cookies, proxy,
     geo-bypass, playlist ranges etc. apply exactly as they would to the real
     download; -J implies simulate, so the output/postprocessing flags are
     inert. --flat-playlist keeps a playlist URL to one request."""
-    if skip_downloaded(settings):
-        # -J of an archived video would print nothing but "already recorded";
-        # the preview should still show it (and flag it — see summarize_info)
-        settings = dict(settings, playlist=dict(settings.get("playlist") or {}, skipDownloaded=False))
-    return build_args(binary, settings, dest) + ["-J", "--flat-playlist", "--no-warnings", url]
+    # -J of an archived video would print nothing but "already recorded",
+    # and a stray -F or --exec in Extra Arguments would break the fetch or
+    # run a command; preview_settings() takes both out.
+    return build_args(binary, preview_settings(settings), dest) + [
+        "-J", "--flat-playlist", "--no-warnings", url]
 
 
 def human_size(n):
@@ -1090,13 +1142,17 @@ def summarize_entries(entries, downloaded=frozenset()):
     `downloaded` is the archive set: matching entries are flagged so the
     picker can start them unticked."""
     out = []
-    for e in entries or []:
+    for position, e in enumerate(entries or [], start=1):
         if not e:
             continue
         url = e.get("url") or e.get("webpage_url")
         if not url:
             continue
         out.append({
+            # Its place in the playlist as yt-dlp counts it, which is what
+            # --playlist-items needs — not its row number, since entries
+            # without a URL are dropped above.
+            "index": e.get("playlist_index") or position,
             "url": url,
             "title": e.get("title") or url,
             "duration": int(e["duration"]) if e.get("duration") else None,
@@ -1723,6 +1779,22 @@ class Api:
             return True
         except Exception:
             return False   # a read-only config dir must not take the queue down (worker thread)
+
+    def ytdlp_config_files(self):
+        """The config files yt-dlp would read, that actually exist — so the
+        Debug panel can say whether ignoring them changes anything."""
+        home = os.path.expanduser("~")
+        xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+        candidates = [
+            os.path.join(xdg, "yt-dlp", "config"),
+            os.path.join(xdg, "yt-dlp", "config.txt"),
+            os.path.join(xdg, "yt-dlp.conf"),
+            os.path.join(home, "yt-dlp.conf"),
+            os.path.join(home, ".yt-dlp", "config"),
+            "/etc/yt-dlp.conf",
+            "/etc/yt-dlp/config",
+        ]
+        return [p for p in candidates if os.path.isfile(p)]
 
     def check_binary(self):
         path = find_ytdlp()
