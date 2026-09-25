@@ -1132,8 +1132,32 @@ def summarize_info(data, downloaded=frozenset()):
         "chapters": summarize_chapters(data.get("chapters")),
         "subtitles": summarize_subtitles(data),
         "live": live_state(data),
+        "fields": template_fields(data),
         "downloaded": archive_line(data) in downloaded,
     }
+
+
+# The output-template fields worth showing an example for. yt-dlp has many
+# more, but these are the ones a filename is usually built from.
+TEMPLATE_FIELDS = (
+    "id", "ext", "title", "fulltitle", "uploader", "channel", "uploader_id",
+    "upload_date", "release_date", "duration_string", "resolution", "height",
+    "width", "fps", "vcodec", "acodec", "format_id", "format_note", "view_count",
+    "like_count", "extractor_key", "playlist", "playlist_title", "playlist_id",
+    "playlist_index", "playlist_count", "webpage_url_domain", "license", "epoch",
+)
+
+
+def template_fields(data):
+    """Scalar values for the filename example, so it shows what this very
+    video would be called rather than a made-up sample."""
+    out = {}
+    for key in TEMPLATE_FIELDS:
+        value = data.get(key)
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            out[key] = value
+    out.setdefault("ext", data.get("ext") or "mp4")
+    return out
 
 
 LIVE_LABELS = {"is_live": "live", "is_upcoming": "upcoming", "post_live": "just ended", "was_live": "was live"}

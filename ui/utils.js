@@ -58,6 +58,40 @@ function formatSpeed(bps) {
   return `${bps.toFixed(i ? 1 : 0)} ${units[i]}`;
 }
 
+// A close-enough render of a yt-dlp output template, for the example shown
+// under the Filename field. Covers what people actually type: %(field)s,
+// widths and precisions (%(playlist_index)03d, %(title).40s), alternatives
+// (%(release_date,upload_date)s), dotted lookups, and %% for a literal
+// percent. Missing fields become NA, as yt-dlp does. It is not the real
+// thing — yt-dlp's own syntax has conversions and filters besides — so the
+// UI calls it an example, not a guarantee.
+const TEMPLATE_FIELD_RE = /%\((?<names>[\w.,: ]+)\)(?<spec>[-+ #0]*\d*(?:\.\d+)?)(?<type>[sdjqBUDSl])?/g;
+
+function renderOutputTemplate(template, fields) {
+  if (!template) return '';
+  return String(template).replace(/%%/g, '\u0000').replace(
+    TEMPLATE_FIELD_RE,
+    (whole, names, spec, type) => {
+      let value;
+      for (const name of names.split(',').map(n => n.trim()).filter(Boolean)) {
+        value = name.split('.').reduce((o, k) => (o == null ? undefined : o[k]), fields);
+        if (value !== undefined && value !== null && value !== '') break;
+      }
+      if (value === undefined || value === null || value === '') return 'NA';
+      let text = String(value);
+      const precision = /\.(\d+)/.exec(spec);
+      if (precision && type !== 'd') text = text.slice(0, Number(precision[1]));
+      const width = /^[-+ #0]*(\d+)/.exec(spec);
+      if (width) {
+        const pad = spec.includes('0') && !spec.includes('-') ? '0' : ' ';
+        const n = Number(width[1]);
+        text = spec.includes('-') ? text.padEnd(n, ' ') : text.padStart(n, pad);
+      }
+      return text;
+    }
+  ).replace(/\u0000/g, '%');
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { getPath, setPath, deepMerge, settingsFingerprint, parseSpeed, formatSpeed };
+  module.exports = { getPath, setPath, deepMerge, settingsFingerprint, parseSpeed, formatSpeed, renderOutputTemplate };
 }

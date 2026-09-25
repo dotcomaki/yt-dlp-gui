@@ -496,6 +496,36 @@
   }
   .live-tag.upcoming { color: #ffd60a; }
   .live-tag.past { color: var(--text-dim); }
+
+  /* Filename template: field buttons and the rendered example */
+  .field-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .field-chips button {
+    background: var(--bg-field);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    cursor: pointer;
+  }
+  .field-chips button:hover { color: var(--text); border-color: var(--accent); }
+  .template-example {
+    margin-top: 8px;
+    padding: 7px 9px;
+    background: var(--bg-field);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .template-example .label {
+    font-family: inherit;
+    color: var(--text-faint);
+    margin-right: 6px;
+  }
   .queue-status {
     font-size: 10.5px;
     text-transform: uppercase;
@@ -842,8 +872,10 @@
               <h3>Filename &amp; Output</h3>
               <div class="field">
                 <label>Output filename template</label>
-                <input type="text" data-bind="filename.template" placeholder="%(title)s.%(ext)s" />
-                <div class="hint">yt-dlp output template syntax, e.g. %(uploader)s/%(title)s.%(ext)s</div>
+                <input type="text" id="templateInput" data-bind="filename.template" placeholder="%(title)s.%(ext)s" />
+                <div class="hint">Click a field to insert it. A <code>/</code> makes a subfolder; widths and lengths work too, e.g. <code>%(playlist_index)03d</code> or <code>%(title).60s</code>.</div>
+                <div class="field-chips" id="templateFields"></div>
+                <div class="template-example"><span class="label">Example</span><span id="templateExample"></span></div>
               </div>
               <div class="checkbox-row">
                 <input type="checkbox" id="cb-restrict" data-bind="filename.restrict" />
@@ -1524,7 +1556,7 @@
   const folderInput = document.getElementById('folderInput');
   document.getElementById('browseBtn').addEventListener('click', async () => {
     const folder = await window.pywebview.api.choose_folder();
-    if (folder) { folderInput.value = folder; saveSettings(); }
+    if (folder) { folderInput.value = folder; saveSettings(); renderTemplateExample(); }
   });
   document.getElementById('cookiesBrowseBtn').addEventListener('click', async () => {
     const file = await window.pywebview.api.choose_file();
@@ -1572,6 +1604,7 @@
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
     if (payload.destFolder) folderInput.value = payload.destFolder;
+    renderTemplateExample();
     window.pywebview.api.set_parallel(settings.network.parallel);
   }
 
@@ -2038,6 +2071,7 @@
   }
 
   function resetSections() {
+    previewFields = null;
     previewChapterRows = [];
     previewChapterPicked = new Set();
     previewDuration = null;
@@ -2123,6 +2157,8 @@
       previewChapterRows = info.chapters || [];
       renderChapterRows();
       renderSubtitleLangs(info.subtitles || []);
+      previewFields = info.fields || null;
+      renderTemplateExample();
     }
     if (openFormatsOnPreview && openFormatsOnPreview === previewUrl && previewFormatRows.length) {
       previewFormats.hidden = false;
@@ -2177,6 +2213,57 @@
     if (!previewEntryRows.length || firstUrl !== previewUrl) return null;
     return previewEntryRows.filter((_, i) => previewPicked.has(i)).map(e => ({ url: e.url, title: e.title }));
   }
+
+  // --- Filename template -------------------------------------------------------
+  // The example renders against the previewed video when there is one, so
+  // it shows what this download will actually be called; otherwise against
+  // a stand-in, so the field buttons are still useful with an empty box.
+  const SAMPLE_FIELDS = {
+    title: 'Me at the zoo', fulltitle: 'Me at the zoo', id: 'jNQXAC9IVRw', ext: 'mp4',
+    uploader: 'jawed', channel: 'jawed', uploader_id: '@jawed', upload_date: '20050424',
+    release_date: '20050424', duration_string: '0:19', resolution: '640x360', height: 360,
+    width: 640, fps: 30, vcodec: 'avc1.4d401e', acodec: 'mp4a.40.2', format_id: '18',
+    format_note: '360p', view_count: 432977234, like_count: 19865908, extractor_key: 'Youtube',
+    playlist: 'Uploads', playlist_title: 'Uploads', playlist_id: 'UU...', playlist_index: 1,
+    playlist_count: 12, webpage_url_domain: 'youtube.com', license: 'NA', epoch: 1790384728,
+  };
+  const TEMPLATE_CHIPS = ['title', 'id', 'ext', 'uploader', 'channel', 'upload_date', 'resolution',
+                          'height', 'fps', 'duration_string', 'view_count', 'format_id',
+                          'playlist', 'playlist_index', 'extractor_key', 'epoch'];
+  const templateInput = document.getElementById('templateInput');
+  const templateExample = document.getElementById('templateExample');
+  let previewFields = null;   // real fields from the last previewed video
+
+  function insertTemplateField(name) {
+    const token = `%(${name})s`;
+    const start = templateInput.selectionStart ?? templateInput.value.length;
+    const end = templateInput.selectionEnd ?? start;
+    templateInput.value = templateInput.value.slice(0, start) + token + templateInput.value.slice(end);
+    const caret = start + token.length;
+    templateInput.setSelectionRange(caret, caret);
+    templateInput.focus();
+    settings.filename.template = templateInput.value;
+    saveSettings();
+    renderTemplateExample();
+  }
+
+  function renderTemplateExample() {
+    const template = (settings.filename.template || '').trim() || '%(title)s.%(ext)s';
+    const fields = previewFields || SAMPLE_FIELDS;
+    const folder = folderInput.value ? folderInput.value.replace(/\/$/, '') + '/' : '';
+    templateExample.textContent = folder + renderOutputTemplate(template, fields);
+    templateExample.title = previewFields ? 'Using the previewed video' : 'No preview yet — using a stand-in video';
+  }
+
+  document.getElementById('templateFields').append(...TEMPLATE_CHIPS.map(name => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = name;
+    b.title = `Insert %(${name})s`;
+    b.addEventListener('click', () => insertTemplateField(name));
+    return b;
+  }));
+  templateInput.addEventListener('input', renderTemplateExample);
 
   // --- Subtitle languages ------------------------------------------------------
   // settings.subtitles.langs stays the plain string yt-dlp takes ("en,es"
@@ -2586,6 +2673,7 @@
       folderInput.value = savedDestFolder || await window.pywebview.api.default_folder();
     } catch (err) {}
     renderProfiles();
+    renderTemplateExample();   // needs the folder, which is only known now
 
     // After the folder is known — with auto-enqueue on, this starts a download.
     const prefillUrl = new URLSearchParams(window.location.search).get('url');

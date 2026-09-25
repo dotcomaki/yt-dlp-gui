@@ -254,3 +254,17 @@ def test_summarize_subtitles_tolerates_missing_or_odd_data():
     assert app.summarize_info({"title": "t"})["subtitles"] == []
     assert app.summarize_info({"title": "t", "subtitles": {"en": None}})["subtitles"] == [
         {"code": "en", "name": "en", "auto": False}]
+
+
+def test_template_fields_are_scalars_only():
+    fields = app.summarize_info({
+        "title": "T", "id": "abc", "upload_date": "20050424", "height": 240, "view_count": 5,
+        "formats": [], "thumbnails": [{"url": "x"}], "is_live": False, "chapters": None,
+    })["fields"]
+    assert fields["title"] == "T" and fields["id"] == "abc" and fields["height"] == 240
+    assert "thumbnails" not in fields and "formats" not in fields and "is_live" not in fields
+    assert fields["ext"] == "mp4"        # a sensible default for the example
+
+
+def test_template_fields_keep_the_real_extension():
+    assert app.summarize_info({"title": "T", "ext": "webm"})["fields"]["ext"] == "webm"

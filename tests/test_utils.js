@@ -3,7 +3,7 @@
 // Run with: node --test tests/test_utils.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getPath, setPath, deepMerge, settingsFingerprint, parseSpeed, formatSpeed } = require('../ui/utils.js');
+const { getPath, setPath, deepMerge, settingsFingerprint, parseSpeed, formatSpeed, renderOutputTemplate } = require('../ui/utils.js');
 
 test('getPath reads a nested value', () => {
   const obj = { audio: { extractAudio: true } };
@@ -106,4 +106,26 @@ test('formatSpeed picks a sensible unit', () => {
   assert.equal(formatSpeed(1.5 * 1024 ** 2), '1.5 MiB/s');
   assert.equal(formatSpeed(3 * 1024 ** 3), '3.0 GiB/s');
   assert.equal(formatSpeed(parseSpeed('1.50MiB/s') + parseSpeed('512.00KiB/s')), '2.0 MiB/s');
+});
+
+test('renderOutputTemplate handles the syntax people actually type', () => {
+  const f = { title: 'Me at the zoo', id: 'jNQXAC9IVRw', ext: 'mp4', uploader: 'jawed',
+              upload_date: '20050424', height: 240, playlist_index: 3 };
+  // each of these was checked against `yt-dlp --load-info-json … --print filename`
+  assert.equal(renderOutputTemplate('%(title)s.%(ext)s', f), 'Me at the zoo.mp4');
+  assert.equal(renderOutputTemplate('%(title)s [%(id)s].%(ext)s', f), 'Me at the zoo [jNQXAC9IVRw].mp4');
+  assert.equal(renderOutputTemplate('%(uploader)s/%(upload_date)s %(title)s.%(ext)s', f),
+               'jawed/20050424 Me at the zoo.mp4');
+  assert.equal(renderOutputTemplate('%(title).8s.%(ext)s', f), 'Me at th.mp4');
+  assert.equal(renderOutputTemplate('%(height)sp.%(ext)s', f), '240p.mp4');
+  assert.equal(renderOutputTemplate('%(playlist_index)03d - %(title)s.%(ext)s', f), '003 - Me at the zoo.mp4');
+});
+
+test('renderOutputTemplate falls back like yt-dlp does', () => {
+  const f = { title: 'T', ext: 'mp4', upload_date: '20050424' };
+  assert.equal(renderOutputTemplate('%(release_date,upload_date)s.%(ext)s', f), '20050424.mp4');
+  assert.equal(renderOutputTemplate('%(nope)s.%(ext)s', f), 'NA.mp4');          // missing -> NA
+  assert.equal(renderOutputTemplate('100%% off %(title)s.%(ext)s', f), '100% off T.mp4');
+  assert.equal(renderOutputTemplate('', f), '');
+  assert.equal(renderOutputTemplate('plain.mp4', f), 'plain.mp4');
 });
