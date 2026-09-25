@@ -32,6 +32,14 @@ The sections below are what `install.sh` is actually doing under the hood, usefu
 - A JavaScript runtime — YouTube now requires one (yt-dlp runs the player's challenge-solving JS through it); without one yt-dlp warns on every YouTube download and some formats are missing. `deno` is what yt-dlp recommends (`brew install deno`, `sudo apt install deno`, or `curl -fsSL https://deno.land/install.sh | sh`); `node` works too (`brew install node`, `sudo apt install nodejs`, or an nvm install). The app looks on your `PATH`, in the Homebrew/`/usr/local`/`/usr/bin` locations, `~/.deno/bin`, `~/.bun/bin` and the newest `~/.nvm/versions/node/*`, and passes what it finds to yt-dlp as `--js-runtimes` — same as it passes `--ffmpeg-location` — because apps launched from the browser extension get a minimal `PATH` that yt-dlp's own search doesn't cope with. The sidebar shows which one is in use.
 - `yt-dlp` on your `PATH` (or, macOS only, at `/usr/local/bin/yt-dlp` or `~/Downloads/yt-dlp_macos`)
 
+## Launching it
+
+`./install.sh` links the app into `~/Applications` on macOS, so **yt-dlp GUI** shows up in Spotlight and Launchpad with its own Dock icon — drag it to the Dock to keep it there. It's a symlink, not a copy: the bundle finds the project relative to itself.
+
+On Linux, `./install.sh` (or `linux/install-desktop.sh` on its own) adds a **yt-dlp GUI** entry to the applications menu; `linux/uninstall-desktop.sh` removes it. The entry holds an absolute path, so re-run it if you move the project folder.
+
+The icons are drawn by `assets/make-icons.py` — run it only if the artwork changes; the results are checked in.
+
 ## Run from source
 
 ```bash

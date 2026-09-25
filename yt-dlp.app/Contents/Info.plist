@@ -7,7 +7,11 @@
   <key>CFBundleIdentifier</key>
   <string>com.dotcomaki.ytdlpgui</string>
   <key>CFBundleName</key>
-  <string>yt-dlp</string>
+  <string>yt-dlp GUI</string>
+  <key>CFBundleDisplayName</key>
+  <string>yt-dlp GUI</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

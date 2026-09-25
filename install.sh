@@ -111,6 +111,25 @@ if [ "$WITH_FIREFOX" -eq 1 ]; then
   echo
 fi
 
+# --- make it launchable like an app ----------------------------------------
+if [ "$(uname -s)" = "Darwin" ] && [ -d "$PROJECT_DIR/yt-dlp.app" ]; then
+  echo "=== Applications ==="
+  mkdir -p "$HOME/Applications"
+  LINK="$HOME/Applications/yt-dlp GUI.app"
+  # A symlink, not a copy: the bundle locates the project relative to
+  # itself, and copying it would break that.
+  if [ -L "$LINK" ] || [ ! -e "$LINK" ]; then
+    ln -sfn "$PROJECT_DIR/yt-dlp.app" "$LINK"
+    echo "Linked: $LINK"
+    echo "It'll show up in Spotlight and Launchpad; drag it to the Dock to keep it there."
+  else
+    echo "Skipped: $LINK already exists and isn't a symlink."
+  fi
+  echo
+else
+  "$PROJECT_DIR/linux/install-desktop.sh" 2>/dev/null || true
+fi
+
 # --- final manual step -----------------------------------------------------
 echo "=== Almost done ==="
 echo
@@ -130,3 +149,8 @@ if [ "$WITH_FIREFOX" -eq 1 ]; then
 fi
 echo "Or just run the app directly any time:"
 echo "  $PROJECT_DIR/venv/bin/python3 app.py"
+if [ "$(uname -s)" = "Darwin" ]; then
+  echo "...or open \"yt-dlp GUI\" from Spotlight."
+else
+  echo "...or launch \"yt-dlp GUI\" from your applications menu."
+fi
