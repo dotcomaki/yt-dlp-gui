@@ -387,18 +387,39 @@ def template_with_suffix(template, suffix):
     return f"{template} - {safe}"
 
 
-# yt-dlp's default name for split chapter files; it resolves that template
-# against the *current directory* when the main -o is absolute (as ours
-# is), so it has to be pointed at the destination explicitly.
+# yt-dlp's default name for split chapter files, spelled out so the
+# destination applies to them too.
 CHAPTER_TEMPLATE = "%(title)s - %(section_number)03d %(section_title)s [%(id)s].%(ext)s"
 
 
 def section_args(section, dest):
     if section.get("splitChapters"):
-        return ["--split-chapters", "-o", "chapter:" + os.path.join(dest, CHAPTER_TEMPLATE)]
+        # Relative, like the main template: the "chapter" path type falls
+        # back to home, which -P has already pointed at the destination.
+        return ["--split-chapters", "-o", "chapter:" + CHAPTER_TEMPLATE]
     start = section.get("start") or 0
     end = section.get("end")
     return ["--download-sections", f"*{_num(start)}-{_num(end) if end is not None else 'inf'}"]
+
+
+def split_lines(text):
+    """One value per line, blanks dropped — for options yt-dlp accepts
+    repeatedly (--add-headers, --extractor-args)."""
+    return [line.strip() for line in (text or "").splitlines() if line.strip()]
+
+
+def cookies_from_browser(auth):
+    """BROWSER[+KEYRING][:PROFILE][::CONTAINER] — the select gives the
+    browser, the two optional fields the rest. Multi-profile Chrome users
+    get the wrong account without this."""
+    spec = auth["cookiesFromBrowser"]
+    profile = (auth.get("cookiesProfile") or "").strip()
+    container = (auth.get("cookiesContainer") or "").strip()
+    if profile:
+        spec += ":" + profile
+    if container:
+        spec += "::" + container
+    return spec
 
 
 def build_args(binary, settings, dest, section=None, slots=None):
@@ -443,10 +464,16 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args += ["--js-runtimes", f"{name}:{path}"]
 
     # --- filename / output template ---
+    # The destination is a base path (-P), not part of the template. Joining
+    # it into -o instead would make the template absolute, and yt-dlp then
+    # applies --trim-filenames to the whole path — observed truncating
+    # "/long/dest/dir/Title.mp4" to 40 characters of *directory*, writing
+    # the file outside the chosen folder. It also makes -P inert, which is
+    # what a temp-download directory would need.
     template = (filename.get("template") or "%(title)s.%(ext)s").strip()
     if section and not section.get("splitChapters"):
         template = template_with_suffix(template, section_label(section))
-    args += ["-o", os.path.join(dest, template)]
+    args += ["-P", "home:" + dest, "-o", template]
     if section:
         args += section_args(section, dest)
         if fmt.get("forceKeyframesAtCuts"):
@@ -457,6 +484,8 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args.append("--no-overwrites")
     if filename.get("windowsFilenames"):
         args.append("--windows-filenames")
+    if filename.get("trim"):
+        args += ["--trim-filenames", str(filename["trim"]).strip()]
 
     # --- format / quality ---
     extract_audio = bool(audio.get("extractAudio")) or preset == "audio"
@@ -516,6 +545,10 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args += ["--sub-langs", subs["langs"]]
     if subs.get("embed"):
         args.append("--embed-subs")
+    if subs.get("format"):
+        args += ["--sub-format", str(subs["format"]).strip()]
+    if subs.get("convert") and subs["convert"] != "none":
+        args += ["--convert-subs", subs["convert"]]
 
     # --- thumbnail / metadata ---
     if thumb.get("write"):
@@ -526,6 +559,16 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args.append("--add-metadata")
     if thumb.get("embedChapters"):
         args.append("--embed-chapters")
+    if thumb.get("convert") and thumb["convert"] != "none":
+        args += ["--convert-thumbnails", thumb["convert"]]
+    if thumb.get("writeDescription"):
+        args.append("--write-description")
+    if thumb.get("writeInfoJson"):
+        args.append("--write-info-json")
+    if thumb.get("writeComments"):
+        args.append("--write-comments")
+    if thumb.get("embedInfoJson"):
+        args.append("--embed-info-json")
 
     # --- network ---
     if net.get("proxy"):
@@ -550,6 +593,14 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args += ["--sleep-requests", str(net["sleepRequests"]).strip()]
     if net.get("socketTimeout"):
         args += ["--socket-timeout", str(net["socketTimeout"])]
+    if net.get("userAgent"):
+        args += ["--user-agent", net["userAgent"].strip()]
+    if net.get("referer"):
+        args += ["--referer", net["referer"].strip()]
+    for header in split_lines(net.get("headers")):
+        args += ["--add-headers", header]
+    if net.get("impersonate"):
+        args += ["--impersonate", net["impersonate"].strip()]
     if net.get("forceIpv4"):
         args.append("-4")
     if net.get("forceIpv6"):
@@ -563,7 +614,13 @@ def build_args(binary, settings, dest, section=None, slots=None):
     if auth.get("cookiesFile"):
         args += ["--cookies", auth["cookiesFile"]]
     if auth.get("cookiesFromBrowser") and auth["cookiesFromBrowser"] != "none":
-        args += ["--cookies-from-browser", auth["cookiesFromBrowser"]]
+        args += ["--cookies-from-browser", cookies_from_browser(auth)]
+    if auth.get("videoPassword"):
+        args += ["--video-password", auth["videoPassword"]]
+    if auth.get("twofactor"):
+        args += ["--twofactor", str(auth["twofactor"]).strip()]
+    if auth.get("netrc"):
+        args.append("--netrc")
 
     # --- sponsorblock ---
     # No fallback to "all" here — the settings default already is "all",
@@ -608,6 +665,10 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args.append("--simulate")
     if debug.get("ignoreErrors"):
         args.append("--ignore-errors")
+
+    # --- extractor arguments (one "IE_KEY:ARGS" per line) ---
+    for spec in split_lines(settings.get("extractorArgs")):
+        args += ["--extractor-args", spec]
 
     # --- raw extra arguments (escape hatch for anything not exposed above) ---
     if extra and extra.strip():
@@ -1021,8 +1082,24 @@ def summarize_info(data, downloaded=frozenset()):
         "url": data.get("webpage_url") or data.get("original_url") or "",
         "formats": summarize_formats(data.get("formats")),
         "chapters": summarize_chapters(data.get("chapters")),
+        "subtitles": summarize_subtitles(data),
         "downloaded": archive_line(data) in downloaded,
     }
+
+
+def summarize_subtitles(data):
+    """The languages this video actually has, for the picker: manual
+    tracks first (with yt-dlp's own display name where it gives one),
+    then automatic captions, which are usually a long machine-translated
+    list — flagged so the UI can fold them away."""
+    out = []
+    for key, auto in (("subtitles", False), ("automatic_captions", True)):
+        for code, tracks in (data.get(key) or {}).items():
+            if not code or any(e["code"] == code for e in out):
+                continue
+            name = next((t.get("name") for t in (tracks or []) if isinstance(t, dict) and t.get("name")), "")
+            out.append({"code": code, "name": name or code, "auto": auto})
+    return out
 
 
 def summarize_chapters(chapters):

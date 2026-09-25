@@ -29,7 +29,7 @@ def test_baseline_structure():
     args = app.build_args("yt-dlp", {}, "/tmp/out")
     assert args[0] == "yt-dlp"
     assert "--newline" in args
-    assert flag_value(args, "-o") == "/tmp/out/%(title)s.%(ext)s"
+    assert flag_value(args, "-P") == "home:/tmp/out" and flag_value(args, "-o") == "%(title)s.%(ext)s"
     # default preset is "best"
     assert flag_value(args, "-f") == "bestvideo+bestaudio/best"
     assert flag_value(args, "--merge-output-format") == "mp4"
@@ -72,7 +72,17 @@ def test_js_runtime_flag_omitted_when_not_found():
 def test_custom_output_template():
     settings = {"filename": {"template": "%(uploader)s/%(title)s.%(ext)s"}}
     args = app.build_args("yt-dlp", settings, "/dl")
-    assert flag_value(args, "-o") == "/dl/%(uploader)s/%(title)s.%(ext)s"
+    assert flag_value(args, "-P") == "home:/dl" and flag_value(args, "-o") == "%(uploader)s/%(title)s.%(ext)s"
+
+
+def test_destination_is_a_base_path_not_part_of_the_template():
+    # Joining it into -o would make the template absolute, and yt-dlp then
+    # trims the whole path for --trim-filenames (observed writing files
+    # outside the destination) and ignores -P entirely.
+    args = app.build_args("yt-dlp", {"filename": {"trim": "40"}}, "/some/quite/long/destination/folder")
+    assert flag_value(args, "-o") == "%(title)s.%(ext)s"
+    assert not flag_value(args, "-o").startswith("/")
+    assert flag_value(args, "-P") == "home:/some/quite/long/destination/folder"
 
 
 def test_filename_flags():
@@ -479,3 +489,70 @@ def test_remux_wins_over_recode():
 def test_quality_label_for_compat():
     assert app.quality_label({"preset": "compat"}) == "compatible (h264/aac mp4)"
     assert app.quality_label({"preset": "1080p"}) == "1080p"
+
+
+# --- options that were only reachable through Extra Arguments (#22) ----------------------
+
+def test_subtitle_format_and_conversion():
+    args = app.build_args("yt-dlp", {"subtitles": {"convert": "srt", "format": " best "}}, "/tmp")
+    assert flag_value(args, "--convert-subs") == "srt" and flag_value(args, "--sub-format") == "best"
+    assert "--convert-subs" not in app.build_args("yt-dlp", {"subtitles": {"convert": "none"}}, "/tmp")
+
+
+def test_thumbnail_conversion_and_metadata_files():
+    settings = {"thumbnail": {"convert": "jpg", "writeDescription": True, "writeInfoJson": True,
+                              "writeComments": True, "embedInfoJson": True}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--convert-thumbnails") == "jpg"
+    for f in ("--write-description", "--write-info-json", "--write-comments", "--embed-info-json"):
+        assert f in args
+
+
+def test_trim_filenames():
+    assert flag_value(app.build_args("yt-dlp", {"filename": {"trim": " 120 "}}, "/tmp"), "--trim-filenames") == "120"
+    assert "--trim-filenames" not in app.build_args("yt-dlp", {"filename": {"trim": ""}}, "/tmp")
+
+
+@pytest.mark.parametrize("auth,expected", [
+    ({"cookiesFromBrowser": "chrome"}, "chrome"),
+    ({"cookiesFromBrowser": "chrome", "cookiesProfile": " Profile 1 "}, "chrome:Profile 1"),
+    ({"cookiesFromBrowser": "firefox", "cookiesContainer": "Personal"}, "firefox::Personal"),
+    ({"cookiesFromBrowser": "firefox", "cookiesProfile": "dev", "cookiesContainer": "Personal"}, "firefox:dev::Personal"),
+])
+def test_cookies_from_browser_profile_and_container(auth, expected):
+    assert flag_value(app.build_args("yt-dlp", {"auth": auth}, "/tmp"), "--cookies-from-browser") == expected
+
+
+def test_profile_is_ignored_without_a_browser():
+    args = app.build_args("yt-dlp", {"auth": {"cookiesFromBrowser": "none", "cookiesProfile": "x"}}, "/tmp")
+    assert "--cookies-from-browser" not in args
+
+
+def test_video_password_twofactor_netrc():
+    args = app.build_args("yt-dlp", {"auth": {"videoPassword": "s3cret", "twofactor": "123456", "netrc": True}}, "/tmp")
+    assert flag_value(args, "--video-password") == "s3cret" and flag_value(args, "--twofactor") == "123456"
+    assert "--netrc" in args
+    assert app.redact_args(args)[args.index("--video-password") + 1] == "••••••"   # not echoed to the Log
+
+
+def test_headers_user_agent_referer_impersonate():
+    settings = {"network": {"userAgent": "Mozilla/5.0", "referer": "https://e.com/",
+                            "headers": "X-A: 1\n\n  X-B: 2  \n", "impersonate": " chrome "}}
+    args = app.build_args("yt-dlp", settings, "/tmp")
+    assert flag_value(args, "--user-agent") == "Mozilla/5.0" and flag_value(args, "--referer") == "https://e.com/"
+    assert flag_value(args, "--impersonate") == "chrome"
+    assert [args[i + 1] for i, a in enumerate(args) if a == "--add-headers"] == ["X-A: 1", "X-B: 2"]
+
+
+def test_extractor_args_one_per_line():
+    args = app.build_args("yt-dlp", {"extractorArgs": "youtube:player_client=web_safari\nvimeo:x=1"}, "/tmp")
+    assert [args[i + 1] for i, a in enumerate(args) if a == "--extractor-args"] == \
+           ["youtube:player_client=web_safari", "vimeo:x=1"]
+    assert "--extractor-args" not in app.build_args("yt-dlp", {"extractorArgs": "  \n "}, "/tmp")
+
+
+@pytest.mark.parametrize("text,expected", [
+    (None, []), ("", []), ("  ", []), ("a", ["a"]), (" a \n\n b ", ["a", "b"]),
+])
+def test_split_lines(text, expected):
+    assert app.split_lines(text) == expected

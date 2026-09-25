@@ -41,7 +41,7 @@ def test_template_suffix_goes_before_the_extension_and_is_made_safe():
 def test_time_range_section():
     args = app.build_args("yt-dlp", {}, "/dl", {"start": 90, "end": 120})
     assert flag(args, "--download-sections") == "*90-120"
-    assert flag(args, "-o") == "/dl/%(title)s - 1m30s-2m00s.%(ext)s"
+    assert flag(args, "-o") == "%(title)s - 1m30s-2m00s.%(ext)s" and flag(args, "-P") == "home:/dl"
     assert "--force-keyframes-at-cuts" not in args
 
 
@@ -56,7 +56,7 @@ def test_chapter_section_uses_its_time_range_and_title():
     args = app.build_args("yt-dlp", {"filename": {"template": "%(uploader)s/%(title)s.%(ext)s"}}, "/dl",
                           {"start": 5, "end": 17, "title": "The cool thing"})
     assert flag(args, "--download-sections") == "*5-17"
-    assert flag(args, "-o") == "/dl/%(uploader)s/%(title)s - The cool thing.%(ext)s"
+    assert flag(args, "-o") == "%(uploader)s/%(title)s - The cool thing.%(ext)s"
 
 
 def test_force_keyframes_only_with_a_section():
@@ -65,12 +65,13 @@ def test_force_keyframes_only_with_a_section():
     assert "--force-keyframes-at-cuts" not in app.build_args("yt-dlp", settings, "/dl")
 
 
-def test_split_chapters_keeps_the_template_and_points_chapter_files_at_the_folder():
+def test_split_chapters_keeps_the_template_and_names_the_chapter_files():
     args = app.build_args("yt-dlp", {}, "/dl", {"splitChapters": True})
     assert "--split-chapters" in args and "--download-sections" not in args
     outs = [args[i + 1] for i, a in enumerate(args) if a == "-o"]
-    assert outs == ["/dl/%(title)s.%(ext)s",
-                    "chapter:/dl/%(title)s - %(section_number)03d %(section_title)s [%(id)s].%(ext)s"]
+    assert outs == ["%(title)s.%(ext)s",
+                    "chapter:%(title)s - %(section_number)03d %(section_title)s [%(id)s].%(ext)s"]
+    assert flag(args, "-P") == "home:/dl"   # both land in the destination
 
 
 def test_info_args_never_carry_a_section():

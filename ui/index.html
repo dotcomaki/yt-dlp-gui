@@ -398,6 +398,21 @@
   .preview-clip .spacer { flex: 1; }
   .preview-entries-head label.split { margin-left: 4px; }
 
+  /* Subtitle languages the previewed video actually has */
+  .preview-subs { flex-wrap: wrap; }
+  .preview-subs .lang {
+    background: var(--bg-field);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .preview-subs .lang:hover { color: var(--text); }
+  .preview-subs .lang.is-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .preview-subs .lang.auto { font-style: italic; }
+
   /* Download queue */
   .queue-section { margin-top: 18px; }
   .queue-header {
@@ -656,6 +671,10 @@
             <span class="spacer"></span>
             <span class="hint-inline">Leave both empty for the whole video</span>
           </div>
+          <div class="preview-clip preview-subs" id="previewSubs" hidden>
+            <span>Subtitles</span>
+            <span class="hint-inline" id="previewSubsNote"></span>
+          </div>
           <div class="preview-entries" id="previewChapters" hidden>
             <div class="preview-entries-head">
               <label><input type="checkbox" id="previewChaptersAll" /> All chapters</label>
@@ -819,6 +838,11 @@
                 <input type="checkbox" id="cb-winNames" data-bind="filename.windowsFilenames" />
                 <label for="cb-winNames">Force Windows-compatible filenames</label>
               </div>
+              <div class="field">
+                <label>Trim filenames to <span class="hint-inline">(characters, excluding the extension)</span></label>
+                <input type="text" data-bind="filename.trim" placeholder="no limit" />
+                <div class="hint">A long title plus a long template can exceed the filesystem's 255-byte limit, and the download fails at the very end when the file is moved into place.</div>
+              </div>
             </div>
 
             <div class="adv-category" id="adv-playlist">
@@ -865,6 +889,24 @@
               <div class="field">
                 <label>Subtitle languages</label>
                 <input type="text" data-bind="subtitles.langs" placeholder="en,es" />
+                <div class="hint">Comma-separated, or <code>all</code>. Preview a video and its actual languages appear as buttons under the card.</div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Convert to</label>
+                  <select data-bind="subtitles.convert">
+                    <option value="none">Leave as downloaded</option>
+                    <option value="srt">srt</option>
+                    <option value="ass">ass</option>
+                    <option value="lrc">lrc</option>
+                    <option value="vtt">vtt</option>
+                  </select>
+                  <div class="hint">YouTube serves <code>vtt</code>; most players and tools want <code>srt</code>.</div>
+                </div>
+                <div class="field">
+                  <label>Preferred format <span class="hint-inline">(before conversion)</span></label>
+                  <input type="text" data-bind="subtitles.format" placeholder="e.g. srt/vtt/best" />
+                </div>
               </div>
             </div>
 
@@ -885,6 +927,32 @@
               <div class="checkbox-row">
                 <input type="checkbox" id="cb-embedChapters" data-bind="thumbnail.embedChapters" />
                 <label for="cb-embedChapters">Embed chapters</label>
+              </div>
+              <div class="field">
+                <label>Convert thumbnails to</label>
+                <select data-bind="thumbnail.convert">
+                  <option value="none">Leave as downloaded</option>
+                  <option value="jpg">jpg</option>
+                  <option value="png">png</option>
+                  <option value="webp">webp</option>
+                </select>
+                <div class="hint">YouTube serves <code>webp</code>, which many file managers and editors won't preview.</div>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-writeDescription" data-bind="thumbnail.writeDescription" />
+                <label for="cb-writeDescription">Write description to a <code>.description</code> file</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-writeInfoJson" data-bind="thumbnail.writeInfoJson" />
+                <label for="cb-writeInfoJson">Write metadata to a <code>.info.json</code> file</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-embedInfoJson" data-bind="thumbnail.embedInfoJson" />
+                <label for="cb-embedInfoJson">Embed that metadata in the video file</label>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-writeComments" data-bind="thumbnail.writeComments" />
+                <label for="cb-writeComments">Write comments too <span class="hint-inline">(slow — fetches every comment)</span></label>
               </div>
             </div>
 
@@ -989,6 +1057,27 @@
                   <div class="hint">Politeness for bulk runs — a random pause per download, and a pause before each metadata request.</div>
                 </div>
               </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>User agent</label>
+                  <input type="text" data-bind="network.userAgent" placeholder="yt-dlp's default" />
+                </div>
+                <div class="field">
+                  <label>Referer</label>
+                  <input type="text" data-bind="network.referer" placeholder="https://example.com/" />
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Extra headers <span class="hint-inline">(one <code>Name: value</code> per line)</span></label>
+                  <textarea data-bind="network.headers" rows="2" placeholder="X-Example: 1"></textarea>
+                </div>
+                <div class="field">
+                  <label>Impersonate a browser</label>
+                  <input type="text" data-bind="network.impersonate" placeholder="e.g. chrome, safari, chrome:windows-10" />
+                  <div class="hint">For sites behind Cloudflare and similar. Needs a yt-dlp built with <code>curl_cffi</code> (the standalone binary is); <code>yt-dlp --list-impersonate-targets</code> shows what yours supports.</div>
+                </div>
+              </div>
               <div class="checkbox-row">
                 <input type="checkbox" id="cb-ipv4" data-bind="network.forceIpv4" />
                 <label for="cb-ipv4">Force IPv4</label>
@@ -1032,6 +1121,31 @@
                   <option value="vivaldi">Vivaldi</option>
                   <option value="whale">Whale</option>
                 </select>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Browser profile <span class="hint-inline">(optional)</span></label>
+                  <input type="text" data-bind="auth.cookiesProfile" placeholder="e.g. Profile 1, or Default" />
+                  <div class="hint">Without this, a multi-profile Chrome or Firefox hands over whichever account is the default — not necessarily the one you're signed in with.</div>
+                </div>
+                <div class="field">
+                  <label>Container <span class="hint-inline">(Firefox only)</span></label>
+                  <input type="text" data-bind="auth.cookiesContainer" placeholder="e.g. Personal" />
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Video password <span class="hint-inline">(Vimeo and friends)</span></label>
+                  <input type="password" data-bind="auth.videoPassword" />
+                </div>
+                <div class="field">
+                  <label>Two-factor code</label>
+                  <input type="text" data-bind="auth.twofactor" />
+                </div>
+              </div>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-netrc" data-bind="auth.netrc" />
+                <label for="cb-netrc">Take credentials from <code>~/.netrc</code> instead</label>
               </div>
             </div>
 
@@ -1156,6 +1270,11 @@
             <div class="adv-category" id="adv-extra">
               <h3>Extra Arguments</h3>
               <div class="field">
+                <label>Extractor arguments <span class="hint-inline">(one <code>EXTRACTOR:key=value</code> per line)</span></label>
+                <textarea data-bind="extractorArgs" rows="2" placeholder="youtube:player_client=web_safari"></textarea>
+                <div class="hint">The usual workaround when a site changes and yt-dlp needs steering — see <em>Extractor Arguments</em> in <code>yt-dlp --help</code>.</div>
+              </div>
+              <div class="field">
                 <label>Raw yt-dlp arguments (appended verbatim)</label>
                 <textarea data-bind="extraArgs" placeholder="--write-info-json --no-mtime"></textarea>
                 <div class="hint">Anything not covered above — passed straight to the yt-dlp command line.</div>
@@ -1200,20 +1319,24 @@
   const settings = {
     preset: 'best',
     format: { customFormat: '', mergeOutputFormat: 'mp4', remuxVideo: 'none', recodeVideo: 'none', preferFreeFormats: false, forceKeyframesAtCuts: false },
-    filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false },
+    filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false, trim: '' },
     playlist: { items: '', noPlaylist: false, maxDownloads: '', skipDownloaded: false, breakOnExisting: false },
-    subtitles: { write: false, writeAuto: false, langs: 'en', embed: false },
-    thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false },
+    subtitles: { write: false, writeAuto: false, langs: 'en', embed: false, format: '', convert: 'none' },
+    thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false, convert: 'none',
+                 writeDescription: false, writeInfoJson: false, writeComments: false, embedInfoJson: false },
     audio: { extractAudio: false, audioFormat: 'mp3', audioQuality: '', keepVideo: false },
     network: { proxy: '', rateLimit: '', retries: '', socketTimeout: '', forceIpv4: false, forceIpv6: false, parallel: '2',
-               concurrentFragments: '', throttledRate: '', fragmentRetries: '', sleepInterval: '', maxSleepInterval: '', sleepRequests: '' },
-    auth: { username: '', password: '', cookiesFile: '', cookiesFromBrowser: 'none' },
+               concurrentFragments: '', throttledRate: '', fragmentRetries: '', sleepInterval: '', maxSleepInterval: '', sleepRequests: '',
+               userAgent: '', referer: '', headers: '', impersonate: '' },
+    auth: { username: '', password: '', cookiesFile: '', cookiesFromBrowser: 'none', cookiesProfile: '', cookiesContainer: '',
+            videoPassword: '', twofactor: '', netrc: false },
     sponsorblock: { mark: false, remove: false, categories: 'all' },
     geo: { disable: false, bypassCountry: '' },
     postrun: { exec: '' },
     debug: { verbose: false, simulate: false, ignoreErrors: false },
     notifications: { enabled: true },
     extension: { autoEnqueue: false },
+    extractorArgs: '',
     extraArgs: '',
   };
   const SETTINGS_DEFAULTS = JSON.parse(JSON.stringify(settings));   // pristine copy, for profile fingerprints
@@ -1855,6 +1978,8 @@
   const previewClip = document.getElementById('previewClip');
   const clipStart = document.getElementById('clipStart');
   const clipEnd = document.getElementById('clipEnd');
+  const previewSubs = document.getElementById('previewSubs');
+  const previewSubsNote = document.getElementById('previewSubsNote');
   const previewChapters = document.getElementById('previewChapters');
   const previewChaptersAll = document.getElementById('previewChaptersAll');
   const previewChaptersSplit = document.getElementById('previewChaptersSplit');
@@ -1883,6 +2008,7 @@
     clipEnd.value = '';
     previewChaptersSplit.checked = false;
     previewClip.hidden = true;
+    previewSubs.hidden = true;
     previewChapters.hidden = true;
   }
 
@@ -1952,6 +2078,7 @@
       previewClip.hidden = false;
       previewChapterRows = info.chapters || [];
       renderChapterRows();
+      renderSubtitleLangs(info.subtitles || []);
     }
     if (openFormatsOnPreview && openFormatsOnPreview === previewUrl && previewFormatRows.length) {
       previewFormats.hidden = false;
@@ -2005,6 +2132,51 @@
   function pickedEntries(firstUrl) {
     if (!previewEntryRows.length || firstUrl !== previewUrl) return null;
     return previewEntryRows.filter((_, i) => previewPicked.has(i)).map(e => ({ url: e.url, title: e.title }));
+  }
+
+  // --- Subtitle languages ------------------------------------------------------
+  // settings.subtitles.langs stays the plain string yt-dlp takes ("en,es"
+  // or "all"), same as the SponsorBlock categories — these buttons are a
+  // view over it, showing only what this video actually has.
+  function currentLangs() {
+    return new Set((settings.subtitles.langs || '').split(',').map(l => l.trim()).filter(Boolean));
+  }
+
+  function renderSubtitleLangs(langs) {
+    previewSubs.querySelectorAll('.lang').forEach(el => el.remove());
+    previewSubs.hidden = langs.length === 0;
+    if (!langs.length) return;
+    const chosen = currentLangs();
+    const all = chosen.has('all');
+    const autoCount = langs.filter(l => l.auto).length;
+    // Automatic captions are usually a hundred machine translations; the
+    // handful of real tracks plus whatever is already chosen is the useful set.
+    const shown = langs.filter(l => !l.auto || chosen.has(l.code) || autoCount <= 8);
+    shown.forEach(l => {
+      const b = document.createElement('button');
+      b.className = 'lang' + (l.auto ? ' auto' : '') + ((all || chosen.has(l.code)) ? ' is-on' : '');
+      b.textContent = l.code;
+      b.title = `${l.name}${l.auto ? ' (auto-generated)' : ''} — click to ${chosen.has(l.code) ? 'remove' : 'add'}`;
+      b.addEventListener('click', () => {
+        const next = currentLangs();
+        next.delete('all');
+        if (next.has(l.code)) next.delete(l.code); else next.add(l.code);
+        settings.subtitles.langs = [...next].join(',');
+        refreshBoundInput('subtitles.langs');
+        if (next.size && !settings.subtitles.write && !settings.subtitles.embed) {
+          settings.subtitles.write = true;   // picking a language plainly means "I want subtitles"
+          refreshBoundInput('subtitles.write');
+        }
+        saveSettings();
+        renderSubtitleLangs(langs);
+      });
+      previewSubs.appendChild(b);
+    });
+    const hidden = langs.length - shown.length;
+    previewSubsNote.textContent = [
+      all ? 'all selected' : '',
+      hidden ? `+${hidden} auto-translated` : '',
+    ].filter(Boolean).join(' · ');
   }
 
   // --- Chapters and clips ------------------------------------------------------

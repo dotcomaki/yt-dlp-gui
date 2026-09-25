@@ -233,3 +233,24 @@ def test_fetch_info_reports_broken_extra_args_cleanly(monkeypatch):
     monkeypatch.setattr(app, "find_ffmpeg", lambda: None)
     info = app.Api().fetch_info("https://v", {"extraArgs": "--foo 'unbalanced"}, "/tmp")
     assert info["ok"] is False and "invalid extra arguments" in info["error"]
+
+
+# --- subtitle languages (#22) ---------------------------------------------------------
+
+def test_summarize_subtitles_lists_manual_tracks_then_auto():
+    info = app.summarize_info({
+        "title": "t",
+        "subtitles": {"en": [{"ext": "vtt", "name": "English"}], "de": [{"ext": "vtt"}]},
+        "automatic_captions": {"en": [{"ext": "vtt"}], "fr": [{"ext": "vtt"}]},
+    })
+    assert info["subtitles"] == [
+        {"code": "en", "name": "English", "auto": False},
+        {"code": "de", "name": "de", "auto": False},
+        {"code": "fr", "name": "fr", "auto": True},          # "en" already listed as manual
+    ]
+
+
+def test_summarize_subtitles_tolerates_missing_or_odd_data():
+    assert app.summarize_info({"title": "t"})["subtitles"] == []
+    assert app.summarize_info({"title": "t", "subtitles": {"en": None}})["subtitles"] == [
+        {"code": "en", "name": "en", "auto": False}]
