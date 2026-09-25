@@ -94,13 +94,11 @@ def test_archive_line_matches_yt_dlp_format():
 
 # --- Api ---------------------------------------------------------------------------------------
 
-def idle(q, timeout=5):
-    t = time.time()
-    while time.time() - t < timeout:
-        if not q.is_active():
-            return True
-        time.sleep(0.02)
-    return False
+def idle(q, timeout=10):
+    """wait_idle, not is_active: a job's persist/history/archive writes run
+    on its worker thread after the status flips, so "nothing is running"
+    comes a moment before "everything is written"."""
+    return q.wait_idle(timeout)
 
 
 def make_api(runner):
