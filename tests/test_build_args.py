@@ -556,3 +556,34 @@ def test_extractor_args_one_per_line():
 ])
 def test_split_lines(text, expected):
     assert app.split_lines(text) == expected
+
+
+# --- window background at startup (#29) --------------------------------------------
+
+def test_startup_background_follows_an_explicit_choice(monkeypatch):
+    monkeypatch.setattr(app, "system_appearance", lambda: "dark")
+    assert app.startup_background({"appearance": "light"}) == "#ffffff"
+    assert app.startup_background({"appearance": "dark"}) == "#1e1e1e"
+
+
+def test_startup_background_asks_the_desktop_when_following_it(monkeypatch):
+    monkeypatch.setattr(app, "system_appearance", lambda: "light")
+    assert app.startup_background({"appearance": "system"}) == "#ffffff"
+    assert app.startup_background({}) == "#ffffff"           # no setting yet
+    assert app.startup_background(None) == "#ffffff"         # no settings file at all
+
+
+def test_system_appearance_reads_the_macos_key(monkeypatch):
+    monkeypatch.setattr(app.sys, "platform", "darwin")
+    monkeypatch.setattr(app.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "Dark\n"})())
+    assert app.system_appearance() == "dark"
+    monkeypatch.setattr(app.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": ""})())
+    assert app.system_appearance() == "light"    # the key is absent in light mode
+
+
+def test_system_appearance_falls_back_to_dark(monkeypatch):
+    monkeypatch.setattr(app.sys, "platform", "linux")
+    def boom(*a, **k):
+        raise OSError("no gsettings")
+    monkeypatch.setattr(app.subprocess, "run", boom)
+    assert app.system_appearance() == "dark"

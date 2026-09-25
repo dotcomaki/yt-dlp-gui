@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)
 ![yt-dlp](https://img.shields.io/badge/powered%20by-yt--dlp-red)
 
-A small dark-themed desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with Python + [pywebview](https://pywebview.flowrl.com/). Includes a browser extension that sends the current tab — or any right-clicked link — straight to the app.
+A small desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with Python + [pywebview](https://pywebview.flowrl.com/). Includes a browser extension that sends the current tab — or any right-clicked link — straight to the app.
 
 **Platform:** macOS is primary and what's actually been tested; Linux support exists but is untested (written to spec) — see [`linux/README.md`](linux/README.md) for Linux-specific setup (an extra system dependency `pywebview` needs, and Linux's native-messaging paths). Every section below is written for macOS unless a Linux note is called out inline.
 
@@ -94,6 +94,8 @@ Firefox needs its own extension folder (`firefox-extension/`) since its manifest
 - **Live streams** (Advanced → Live Streams): record from the beginning rather than from the moment you click (`--live-from-start`), or wait for a scheduled stream to start (`--wait-for-video`). The preview badges a video as live, upcoming (with its scheduled time), or just ended. (filter to one download's output, Copy, Save…, a Follow toggle that switches itself off when you scroll up to read; capped at the newest 5,000 lines; passwords and proxy credentials are masked in the echoed command). Queue and History titles and paths can be selected and copied.
 - URLs sent from the browser extension while the app is open are added to the box (Advanced → Notifications → *Browser extension* to have them start downloading immediately instead)
 - Desktop notification when the queue finishes (Advanced → Notifications, on by default) — one per batch with finished/failed counts, or the title when it's a single download. macOS via Notification Center; Linux needs `notify-send`.
+
+- **Light theme** (Advanced → Appearance): follow the system, or pin dark or light. The window frame's own colour is chosen at launch from the same setting, so there's no flash of the wrong theme.
 
 ## Keyboard shortcuts
 

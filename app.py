@@ -2157,6 +2157,34 @@ class InstanceServer:
             pass
 
 
+WINDOW_BACKGROUNDS = {"dark": "#1e1e1e", "light": "#ffffff"}
+
+
+def system_appearance():
+    """'light' or 'dark' as the desktop reports it, defaulting to dark."""
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                                 capture_output=True, text=True, timeout=2)
+            # The key only exists in dark mode; absent means light.
+            return "dark" if "dark" in out.stdout.strip().lower() else "light"
+        out = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+                             capture_output=True, text=True, timeout=2)
+        return "light" if "light" in out.stdout.lower() else "dark"
+    except (OSError, subprocess.SubprocessError):
+        return "dark"
+
+
+def startup_background(settings):
+    """The window's own background colour, so the frame doesn't flash the
+    wrong theme before the page has painted. pywebview fixes this at
+    creation, so it's read from the saved settings rather than the UI."""
+    appearance = (settings or {}).get("appearance") or "system"
+    if appearance not in WINDOW_BACKGROUNDS:
+        appearance = system_appearance()
+    return WINDOW_BACKGROUNDS.get(appearance, WINDOW_BACKGROUNDS["dark"])
+
+
 def main():
     initial_url = sys.argv[1] if len(sys.argv) > 1 else ""
     # Already open? Hand the URL over and get out of the way. With no URL
@@ -2185,7 +2213,7 @@ def main():
         width=860,
         height=640,
         min_size=(700, 520),
-        background_color="#1e1e1e",
+        background_color=startup_background((api.load_settings() or {}).get("settings")),
     )
     api.set_window(window)
     try:

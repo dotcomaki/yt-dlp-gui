@@ -4,18 +4,68 @@
 <meta charset="utf-8" />
 <title>yt-dlp</title>
 <style>
+  /* Dark is the default. A light set follows the system unless the
+     Appearance setting has pinned a theme, which data-theme spells out. */
   :root {
     --bg-sidebar: #1c1c1e;
     --bg-main: #161616;
     --bg-panel: #202022;
     --bg-field: #262628;
+    --bg-hover: #2d2d2f;
+    --bg-log: #0d0d0d;
     --border: #333335;
     --text: #e4e4e6;
     --text-dim: #8e8e93;
-    --text-faint: #626264;
+    --text-faint: #8a8a90;
+    --text-log: #b0b0b3;
     --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
     --danger: #ff453a;
     --success: #32d74b;
+    --warning: #ffd60a;
+    color-scheme: dark;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg-sidebar: #f2f2f4;
+      --bg-main: #ffffff;
+      --bg-panel: #fbfbfd;
+      --bg-field: #ffffff;
+      --bg-hover: #e6e6ea;
+      --bg-log: #fbfbfd;
+      --border: #d4d4d8;
+      --text: #1c1c1e;
+      --text-dim: #5f5f66;
+      --text-faint: #6b6b75;
+      --text-log: #2c2c30;
+      --accent: #0066cc;
+      --accent-soft: rgba(0, 102, 204, 0.14);
+      --danger: #c9302c;
+      --success: #1a7f37;
+      --warning: #9a6700;
+      color-scheme: light;
+    }
+  }
+
+  :root[data-theme="light"] {
+    --bg-sidebar: #f2f2f4;
+    --bg-main: #ffffff;
+    --bg-panel: #fbfbfd;
+    --bg-field: #ffffff;
+    --bg-hover: #e6e6ea;
+    --bg-log: #fbfbfd;
+    --border: #d4d4d8;
+    --text: #1c1c1e;
+    --text-dim: #5f5f66;
+    --text-faint: #6b6b75;
+    --text-log: #2c2c30;
+    --accent: #0066cc;
+    --accent-soft: rgba(0, 102, 204, 0.14);
+    --danger: #c9302c;
+    --success: #1a7f37;
+    --warning: #9a6700;
+    color-scheme: light;
   }
 
   * { box-sizing: border-box; }
@@ -76,7 +126,7 @@
     font-size: 13px;
     margin-bottom: 1px;
   }
-  .nav-item:hover { background: #2a2a2c; }
+  .nav-item:hover { background: var(--bg-hover); }
   .nav-item.active {
     background: var(--accent);
     color: #fff;
@@ -113,7 +163,7 @@
   .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
   .status-dot.ok { background: var(--success); }
   .status-dot.err { background: var(--danger); }
-  .status-dot.warn { background: #ffd60a; }
+  .status-dot.warn { background: var(--warning); }
   /* button.small-btn is declared later with higher specificity than a bare
      class, so qualify this the same way for the overrides to actually win. */
   button.small-btn.update-btn {
@@ -221,7 +271,7 @@
     font-size: 12.5px;
     cursor: pointer;
   }
-  button.plain-btn:hover { background: #2d2d2f; }
+  button.plain-btn:hover { background: var(--bg-hover); }
 
   .seg {
     display: flex;
@@ -351,7 +401,7 @@
   }
   .preview-formats tbody tr { cursor: pointer; }
   .preview-formats tbody tr:hover { background: var(--bg-field); }
-  .preview-formats tbody tr.is-selected { background: rgba(10, 132, 255, 0.18); }
+  .preview-formats tbody tr.is-selected { background: var(--accent-soft); }
   .preview-formats tbody tr.is-selected td:last-child::after { content: "\2713"; color: var(--accent); }
   .preview-formats .hint { padding: 6px 8px; }
 
@@ -447,7 +497,7 @@
   }
   .queue-actions { display: flex; gap: 6px; }
   .queue-stats { font-size: 11px; color: var(--text-dim); margin-left: 10px; font-variant-numeric: tabular-nums; }
-  .queue-stats .paused { color: #ffd60a; }
+  .queue-stats .paused { color: var(--warning); }
   .queue-list {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -516,7 +566,7 @@
     letter-spacing: 0.05em;
     font-weight: 600;
   }
-  .live-tag.upcoming { color: #ffd60a; }
+  .live-tag.upcoming { color: var(--warning); }
   .live-tag.past { color: var(--text-dim); }
 
   /* Filename template: field buttons and the rendered example */
@@ -625,7 +675,7 @@
     font-size: 11.5px;
     cursor: pointer;
   }
-  button.small-btn:hover { background: #2d2d2f; color: var(--text); }
+  button.small-btn:hover { background: var(--bg-hover); color: var(--text); }
   .advanced-body {
     flex: 1;
     display: flex;
@@ -657,7 +707,7 @@
   .log {
     flex: 1;
     min-height: 0;
-    background: #0d0d0d;
+    background: var(--bg-log);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 10px 12px;
@@ -665,14 +715,14 @@
     font-family: "SF Mono", ui-monospace, Menlo, monospace;
     font-size: 11px;
     line-height: 1.6;
-    color: #b0b0b3;
+    color: var(--text-log);
     -webkit-user-select: text;
     user-select: text;
   }
   .log .err-line { color: var(--danger); }
   .log .ok-line { color: var(--success); }
   .log::-webkit-scrollbar { width: 8px; }
-  .log::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
+  .log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
   .empty-log { color: var(--text-faint); font-style: italic; }
 </style>
 </head>
@@ -845,6 +895,7 @@
             <button type="button" role="tab" class="nav-item" data-adv="geo" aria-selected="false" aria-controls="adv-geo"><span class="dot-icon"></span>Geo-restriction</button>
             <button type="button" role="tab" class="nav-item" data-adv="postrun" aria-selected="false" aria-controls="adv-postrun"><span class="dot-icon"></span>Post-run Command</button>
             <button type="button" role="tab" class="nav-item" data-adv="debug" aria-selected="false" aria-controls="adv-debug"><span class="dot-icon"></span>Debug &amp; Logging</button>
+            <button type="button" role="tab" class="nav-item" data-adv="appearance" aria-selected="false" aria-controls="adv-appearance"><span class="dot-icon"></span>Appearance</button>
             <button type="button" role="tab" class="nav-item" data-adv="notifications" aria-selected="false" aria-controls="adv-notifications"><span class="dot-icon"></span>Notifications</button>
             <button type="button" role="tab" class="nav-item" data-adv="extra" aria-selected="false" aria-controls="adv-extra"><span class="dot-icon"></span>Extra Arguments</button>
           </div>
@@ -1348,6 +1399,19 @@
               <div class="hint" id="configFileHint">Off by default: yt-dlp is run with <code>--ignore-config</code> so this app's settings are the whole story. Turn it on if you keep options in a yt-dlp config file — they'll merge with, and can override or double, what the panels say.</div>
             </div>
 
+            <div class="adv-category" id="adv-appearance">
+              <h3>Appearance</h3>
+              <div class="field">
+                <label>Theme</label>
+                <div class="seg" id="themeSeg">
+                  <button type="button" data-theme="system">Follow system</button>
+                  <button type="button" data-theme="dark">Dark</button>
+                  <button type="button" data-theme="light">Light</button>
+                </div>
+                <div class="hint">Applies immediately. The window frame's own colour is picked when the app starts, so it catches up on the next launch.</div>
+              </div>
+            </div>
+
             <div class="adv-category" id="adv-notifications">
               <h3>Notifications</h3>
               <div class="checkbox-row">
@@ -1436,6 +1500,7 @@
     debug: { verbose: false, simulate: false, ignoreErrors: false, useConfigFile: false },
     notifications: { enabled: true },
     extension: { autoEnqueue: false },
+    appearance: 'system',
     extractorArgs: '',
     extraArgs: '',
   };
@@ -1642,6 +1707,7 @@
     deepMerge(settings, payload.settings || {});
     settings.auth.password = password;
     refreshAllBoundInputs();
+    applyTheme(/* skipSave */ true);
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
     if (payload.destFolder) folderInput.value = payload.destFolder;
@@ -2331,6 +2397,25 @@
     }];
   }
 
+  // --- Appearance --------------------------------------------------------------
+  // The stylesheet defaults to dark and follows the system in a media
+  // query; data-theme pins it when the user has chosen one.
+  const themeSeg = document.getElementById('themeSeg');
+
+  function applyTheme(skipSave) {
+    const choice = settings.appearance || 'system';
+    if (choice === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = choice;
+    [...themeSeg.children].forEach(b => b.classList.toggle('active', b.dataset.theme === choice));
+    if (!skipSave) saveSettings();
+  }
+
+  themeSeg.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') return;
+    settings.appearance = e.target.dataset.theme;
+    applyTheme();
+  });
+
   // --- Filename template -------------------------------------------------------
   // The example renders against the previewed video when there is one, so
   // it shows what this download will actually be called; otherwise against
@@ -2774,6 +2859,7 @@
     try { profiles = (await window.pywebview.api.load_profiles()).profiles || {}; } catch (err) {}
 
     bindInputs();
+    applyTheme(/* skipSave */ true);
     syncSponsorBlockUI();
     selectPreset(settings.preset, /* skipSave */ true);
     customFormatInput.value = settings.format.customFormat || '';
