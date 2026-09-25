@@ -19,7 +19,7 @@ Download the [latest release](../../releases/latest), extract it, and from insid
 
 or, on macOS, just double-click `install.command` in Finder — no Terminal needed.
 
-This installs everything scriptable in one pass: system dependencies (ffmpeg, yt-dlp, and on Linux the GTK backend `pywebview` needs), a project-local virtualenv with `pywebview` installed into it, and the native messaging host for whichever browsers it detects. Pass `--firefox` to also set up the Firefox extension (a few extra manual steps are unavoidable there — see [`firefox-extension/README.md`](firefox-extension/README.md)).
+This installs everything scriptable in one pass: system dependencies (ffmpeg, yt-dlp, and on Linux the GTK backend `pywebview` needs), a project-local virtualenv with `pywebview` installed into it, and the native messaging host for whichever browsers it detects. Homebrew is used if you have it but isn't required — with MacPorts or hand-installed binaries the script tells you what's missing and carries on. Pass `--firefox` to also set up the Firefox extension (a few extra manual steps are unavoidable there — see [`firefox-extension/README.md`](firefox-extension/README.md)).
 
 One step genuinely can't be scripted — browsers don't allow installing an unpacked extension from the command line — so the script finishes by printing exactly what to click (`chrome://extensions` → Developer mode → Load unpacked → the `extension/` folder). Safe to re-run any time.
 
@@ -28,9 +28,9 @@ The sections below are what `install.sh` is actually doing under the hood, usefu
 ## Requirements
 
 - Python 3.9+, `pywebview` + `certifi` (`pip install -r requirements.txt`; `certifi` is what lets the update check reach GitHub over HTTPS from python.org's macOS Python, whose bundled OpenSSL ships with an empty trust store) — **Linux only:** don't run that command as-is; `pywebview` needs a system-level GTK or Qt backend pip can't provide, and most distros now block a plain `pip install` outside a virtualenv anyway (PEP 668). See [`linux/README.md`](linux/README.md#system-dependencies) for the actual steps.
-- `ffmpeg` — required to merge separate video+audio streams; without it, downloads above 720p will have no audio. macOS: `brew install ffmpeg`. Linux: `sudo apt install ffmpeg` (or your distro's equivalent)
+- `ffmpeg` — required to merge separate video+audio streams; without it the app falls back to the best single pre-merged stream (720p at most on YouTube). macOS: `brew install ffmpeg`, `sudo port install ffmpeg`, or a build from [evermeet.cx](https://evermeet.cx/ffmpeg/). Linux: `sudo apt install ffmpeg` (or your distro's equivalent)
 - A JavaScript runtime — YouTube now requires one (yt-dlp runs the player's challenge-solving JS through it); without one yt-dlp warns on every YouTube download and some formats are missing. `deno` is what yt-dlp recommends (`brew install deno`, `sudo apt install deno`, or `curl -fsSL https://deno.land/install.sh | sh`); `node` works too (`brew install node`, `sudo apt install nodejs`, or an nvm install). The app looks on your `PATH`, in the Homebrew/`/usr/local`/`/usr/bin` locations, `~/.deno/bin`, `~/.bun/bin` and the newest `~/.nvm/versions/node/*`, and passes what it finds to yt-dlp as `--js-runtimes` — same as it passes `--ffmpeg-location` — because apps launched from the browser extension get a minimal `PATH` that yt-dlp's own search doesn't cope with. The sidebar shows which one is in use.
-- `yt-dlp` on your `PATH` (or, macOS only, at `/usr/local/bin/yt-dlp` or `~/Downloads/yt-dlp_macos`)
+- `yt-dlp` on your `PATH`, or in any of the usual places — Homebrew, MacPorts (`/opt/local/bin`), `/usr/local/bin`, `~/.local/bin`, or `~/Downloads/yt-dlp_macos`
 
 ## Uninstalling
 

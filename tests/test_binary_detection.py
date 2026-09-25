@@ -116,7 +116,8 @@ def test_runtime_candidates_order(monkeypatch):
     # extras (~/.deno/bin, nvm, …) — same shape as FFMPEG_CANDIDATES.
     monkeypatch.setattr(app.shutil, "which", lambda name: f"/from/path/{name}")
     assert app._runtime_candidates("deno", "/home/u/.deno/bin/deno") == [
-        "/from/path/deno", "/opt/homebrew/bin/deno", "/usr/local/bin/deno", "/usr/bin/deno",
+        "/from/path/deno", "/opt/homebrew/bin/deno", "/usr/local/bin/deno",
+        "/opt/local/bin/deno", "/usr/bin/deno",
         "/home/u/.deno/bin/deno",
     ]
 
@@ -134,3 +135,19 @@ def test_nvm_node_candidates_newest_version_first(monkeypatch, tmp_path):
 def test_nvm_node_candidates_empty_without_nvm(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert app._nvm_node_candidates() == []
+
+
+# --- MacPorts (#35) ------------------------------------------------------------------
+
+def test_macports_locations_are_searched(tmp_path, monkeypatch):
+    monkeypatch.setattr(app.shutil, "which", lambda name: None)
+    assert "/opt/local/bin/yt-dlp" in app.YTDLP_CANDIDATES
+    assert "/opt/local/bin/ffmpeg" in app.FFMPEG_CANDIDATES
+    # (conftest empties JS_RUNTIME_CANDIDATES for the suite, so check the builder)
+    assert "/opt/local/bin/deno" in app._runtime_candidates("deno")
+
+
+def test_a_macports_install_is_package_managed():
+    # not pip-upgradable, and not Homebrew either
+    assert app.detect_install_method("/opt/local/bin/yt-dlp") == ("package", None)
+    assert app.update_command("package", "/opt/local/bin/yt-dlp") is None

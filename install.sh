@@ -33,25 +33,51 @@ echo
 
 # --- system dependencies -----------------------------------------------
 if [ "$OS" = "Darwin" ]; then
-  if ! command -v brew >/dev/null 2>&1; then
-    echo "Homebrew is required and wasn't found."
-    echo "Install it from https://brew.sh, then re-run this script:"
-    echo '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-    exit 1
-  fi
+  # The app doesn't need Homebrew — only ffmpeg and yt-dlp, from wherever.
+  # It looks in the usual places as well as PATH, so MacPorts and manual
+  # installs are fine; Homebrew just makes this script able to do it for you.
+  have() {
+    command -v "$1" >/dev/null 2>&1 && return 0
+    for P in "/opt/homebrew/bin/$1" "/usr/local/bin/$1" "/opt/local/bin/$1" "/usr/bin/$1"; do
+      [ -x "$P" ] && return 0
+    done
+    return 1
+  }
 
-  if ! command -v ffmpeg >/dev/null 2>&1; then
-    echo "Installing ffmpeg..."
-    brew install ffmpeg
-  else
-    echo "ffmpeg already installed: $(command -v ffmpeg)"
-  fi
+  MISSING=""
+  for TOOL in ffmpeg yt-dlp; do
+    if have "$TOOL"; then
+      echo "$TOOL already installed: $(command -v "$TOOL" || echo "found outside PATH")"
+    elif command -v brew >/dev/null 2>&1; then
+      echo "Installing $TOOL..."
+      brew install "$TOOL"
+    else
+      MISSING="$MISSING $TOOL"
+    fi
+  done
 
-  if ! command -v yt-dlp >/dev/null 2>&1; then
-    echo "Installing yt-dlp..."
-    brew install yt-dlp
-  else
-    echo "yt-dlp already installed: $(command -v yt-dlp)"
+  if [ -n "$MISSING" ]; then
+    echo
+    echo "Missing:$MISSING — and Homebrew isn't installed, so this script"
+    echo "can't fetch them for you. Any of these works; the app finds them"
+    echo "on PATH or in the usual install locations:"
+    echo
+    echo "  * Homebrew (easiest):  https://brew.sh   then re-run this script"
+    echo "  * MacPorts:            sudo port install ffmpeg yt-dlp"
+    case "$MISSING" in
+      *yt-dlp*)
+        echo "  * yt-dlp by hand:      download the macOS build from"
+        echo "                         https://github.com/yt-dlp/yt-dlp/releases/latest"
+        echo "                         and put it at /usr/local/bin/yt-dlp (chmod +x)" ;;
+    esac
+    case "$MISSING" in
+      *ffmpeg*)
+        echo "  * ffmpeg by hand:      https://evermeet.cx/ffmpeg/ -> /usr/local/bin/ffmpeg" ;;
+    esac
+    echo
+    echo "Carrying on with the rest of the setup — the app will tell you in its"
+    echo "sidebar if it still can't find them."
+    echo
   fi
 
 elif [ "$OS" = "Linux" ]; then

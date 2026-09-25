@@ -20,6 +20,8 @@ import webview
 YTDLP_CANDIDATES = [
     shutil.which("yt-dlp"),
     "/usr/local/bin/yt-dlp",
+    "/opt/homebrew/bin/yt-dlp",                        # Homebrew on Apple silicon
+    "/opt/local/bin/yt-dlp",                           # MacPorts
     os.path.expanduser("~/Downloads/yt-dlp_macos"),   # macOS manual download
     "/usr/bin/yt-dlp",                                 # Linux distro package
     os.path.expanduser("~/.local/bin/yt-dlp"),         # Linux `pip install --user`
@@ -29,6 +31,7 @@ FFMPEG_CANDIDATES = [
     shutil.which("ffmpeg"),
     "/opt/homebrew/bin/ffmpeg",
     "/usr/local/bin/ffmpeg",
+    "/opt/local/bin/ffmpeg",                           # MacPorts
     "/usr/bin/ffmpeg",
 ]
 
@@ -54,7 +57,7 @@ def _nvm_node_candidates():
 
 def _runtime_candidates(name, *extra):
     return [shutil.which(name), f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}",
-            f"/usr/bin/{name}", *extra]
+            f"/opt/local/bin/{name}", f"/usr/bin/{name}", *extra]
 
 
 # In yt-dlp's own priority order (deno, node, quickjs, bun — see
@@ -329,6 +332,9 @@ def detect_install_method(path):
     spellings = (path, real)
     if any("/Cellar/" in p or "/.linuxbrew/" in p or p.startswith("/opt/homebrew/") for p in spellings):
         return "homebrew", None
+    # MacPorts: its own package manager, so not something to pip-upgrade.
+    if any(p.startswith("/opt/local/") for p in spellings):
+        return "package", None
     # Distro packages land in /usr/bin as a python script too, but their
     # system python blocks `pip install` (PEP 668) — treat as package-managed.
     if any(p.startswith(("/usr/bin/", "/usr/lib/", "/usr/lib64/")) for p in spellings):
