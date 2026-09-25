@@ -478,6 +478,24 @@
     transition: width 0.2s ease-out;
   }
   .queue-row.is-done .queue-fill { background: var(--success); }
+  /* Total unknown (live, chunked HTTP): show motion, not a stuck number */
+  .queue-bar.is-indeterminate .queue-fill {
+    width: 35% !important;
+    animation: queue-slide 1.4s ease-in-out infinite;
+  }
+  @keyframes queue-slide {
+    0% { margin-left: -35%; }
+    100% { margin-left: 100%; }
+  }
+  .live-tag {
+    color: var(--danger);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .live-tag.upcoming { color: #ffd60a; }
+  .live-tag.past { color: var(--text-dim); }
   .queue-status {
     font-size: 10.5px;
     text-transform: uppercase;
@@ -761,6 +779,7 @@
             <div class="nav-item active" data-adv="format"><span class="dot-icon"></span>Format &amp; Quality</div>
             <div class="nav-item" data-adv="filename"><span class="dot-icon"></span>Filename &amp; Output</div>
             <div class="nav-item" data-adv="playlist"><span class="dot-icon"></span>Playlist</div>
+            <div class="nav-item" data-adv="live"><span class="dot-icon"></span>Live Streams</div>
             <div class="nav-item" data-adv="subtitles"><span class="dot-icon"></span>Subtitles</div>
             <div class="nav-item" data-adv="thumbnail"><span class="dot-icon"></span>Thumbnail &amp; Metadata</div>
             <div class="nav-item" data-adv="audio"><span class="dot-icon"></span>Audio Extraction</div>
@@ -870,6 +889,20 @@
                 <label for="cb-breakOnExisting">…and stop a playlist at the first one already downloaded</label>
               </div>
               <div class="hint">Re-running a channel or playlist then only fetches what's new. The skip list is built from the History tab (<code>--download-archive</code>), so removing an entry there — or clearing history — makes that video downloadable again. The preview marks already-downloaded videos and unticks them in the playlist picker.</div>
+            </div>
+
+            <div class="adv-category" id="adv-live">
+              <h3>Live Streams</h3>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cb-liveFromStart" data-bind="live.fromStart" />
+                <label for="cb-liveFromStart">Record from the beginning, not from now</label>
+              </div>
+              <div class="hint">Where the site keeps the earlier part of a stream available (YouTube usually does). Without it a live download starts at the current moment.</div>
+              <div class="field">
+                <label>Wait for a scheduled stream <span class="hint-inline">(seconds between checks, or <code>min-max</code>)</span></label>
+                <input type="text" data-bind="live.waitForVideo" placeholder="e.g. 30, or 30-120" />
+                <div class="hint">yt-dlp keeps polling until the stream starts instead of failing with "this live event will begin in…". The queue item just sits there running in the meantime.</div>
+              </div>
             </div>
 
             <div class="adv-category" id="adv-subtitles">
@@ -1321,6 +1354,7 @@
     format: { customFormat: '', mergeOutputFormat: 'mp4', remuxVideo: 'none', recodeVideo: 'none', preferFreeFormats: false, forceKeyframesAtCuts: false },
     filename: { template: '%(title)s.%(ext)s', restrict: false, noOverwrites: false, windowsFilenames: false, trim: '' },
     playlist: { items: '', noPlaylist: false, maxDownloads: '', skipDownloaded: false, breakOnExisting: false },
+    live: { fromStart: false, waitForVideo: '' },
     subtitles: { write: false, writeAuto: false, langs: 'en', embed: false, format: '', convert: 'none' },
     thumbnail: { write: false, embed: false, addMetadata: false, embedChapters: false, convert: 'none',
                  writeDescription: false, writeInfoJson: false, writeComments: false, embedInfoJson: false },
@@ -1734,6 +1768,7 @@
       const fill = document.createElement('div');
       fill.className = 'queue-fill';
       fill.style.width = (job.pct || 0) + '%';
+      if (job.status === 'running' && indeterminate.has(job.id)) bar.classList.add('is-indeterminate');
       bar.appendChild(fill);
       main.appendChild(bar);
     }
@@ -1812,6 +1847,7 @@
   let lastJobs = [];
   let queuePaused = false;
   const jobSpeed = new Map();   // bytes/s per running job, from ytdlp-progress
+  const indeterminate = new Set();   // jobs whose total size yt-dlp doesn't know
   const pauseBtn = document.getElementById('pauseBtn');
   const queueStats = document.getElementById('queueStats');
 
@@ -1838,6 +1874,7 @@
     const ids = new Set(jobs.map(j => j.id));
     for (const id of jobMeta.keys()) if (!ids.has(id)) jobMeta.delete(id);
     for (const id of jobSpeed.keys()) if (!ids.has(id)) jobSpeed.delete(id);
+    for (const id of [...indeterminate]) if (!ids.has(id)) indeterminate.delete(id);
     renderQueueStats();
     const running = jobs.filter(j => j.status === 'running').length;
     window.pywebview.api.set_title(running ? `yt-dlp — ${running} downloading` : 'yt-dlp');
@@ -2056,6 +2093,13 @@
     if (info.uploader) bits.push(info.uploader);
     if (info.duration != null) bits.push(formatDuration(info.duration));
     previewMeta.textContent = bits.join(' · ');
+    if (info.live) {
+      const tag = document.createElement('span');
+      tag.className = 'live-tag' + (info.live.state === 'is_upcoming' ? ' upcoming' : (info.live.state === 'is_live' ? '' : ' past'));
+      tag.textContent = ' · ' + info.live.label +
+        (info.live.startsAt ? ' ' + new Date(info.live.startsAt * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
+      previewMeta.appendChild(tag);
+    }
     if (info.downloaded) {
       const tag = document.createElement('span');
       tag.className = 'done-tag';
@@ -2459,16 +2503,23 @@
   });
 
   window.addEventListener('ytdlp-progress', (e) => {
-    const { jobId, pct, size, speed, eta } = e.detail;
-    const meta = `${pct.toFixed(1)}%${size ? ' of ' + size : ''}${speed ? ' · ' + speed : ''}${eta ? ' · ETA ' + eta : ''}`;
+    const { jobId, pct, size, speed, eta, elapsed } = e.detail;
+    // pct is null when yt-dlp doesn't know the total (a live stream, or a
+    // server that sends no length): show what is known and let the bar move.
+    const meta = pct == null
+      ? [size, speed, elapsed && `${elapsed} elapsed`].filter(Boolean).join(' · ')
+      : `${pct.toFixed(1)}%${size ? ' of ' + size : ''}${speed ? ' · ' + speed : ''}${eta ? ' · ETA ' + eta : ''}`;
     jobMeta.set(jobId, meta);
     jobSpeed.set(jobId, parseSpeed(speed));
+    if (pct == null) indeterminate.add(jobId); else indeterminate.delete(jobId);
     renderQueueStats();
     const row = rowFor(jobId);
     if (!row) return;
     row.querySelector('.queue-meta').textContent = meta;
+    const bar = row.querySelector('.queue-bar');
+    if (bar) bar.classList.toggle('is-indeterminate', pct == null);
     const fill = row.querySelector('.queue-fill');
-    if (fill) fill.style.width = pct + '%';
+    if (fill && pct != null) fill.style.width = pct + '%';
   });
 
   window.addEventListener('ytdlp-done', (e) => {

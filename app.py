@@ -66,10 +66,53 @@ JS_RUNTIME_CANDIDATES = [
     ("bun", _runtime_candidates("bun", os.path.expanduser("~/.bun/bin/bun"))),
 ]
 
+# yt-dlp's --newline progress lines come in three shapes, and the app has
+# to read all of them (verified against yt-dlp 2026.08.19):
+#   [download]  71.4% of ~  21.00KiB at    1.19KiB/s ETA Unknown (frag 0/3)
+#   [download]   31.00KiB at   15.19MiB/s (00:00:00)      <- total unknown: live, chunked HTTP
+#   [download] 100% of  113.71KiB in 00:00:00 at 143.44KiB/s
+# Note the spaces after "~" (an estimated total) — requiring a digit there
+# meant fragmented and HLS downloads showed no progress at all.
+_SIZE = r"[\d.]+\s*[KMGT]?i?B"
+_RATE = r"(?:[\d.]+\s*[KMGT]?i?B/s|Unknown\s*B/s)"
+
 PROGRESS_RE = re.compile(
-    r"\[download\]\s+(?P<pct>[\d.]+)%.*?of\s+~?(?P<size>[\d.]+\S+)"
-    r"(?:\s+at\s+(?P<speed>[\d.]+\S+/s))?(?:\s+ETA\s+(?P<eta>\S+))?"
+    rf"\[download\]\s+(?P<pct>[\d.]+)%\s+of\s+~?\s*(?P<size>{_SIZE})"
+    rf"(?:\s+in\s+(?P<elapsed>[\d:]+))?"
+    rf"(?:\s+at\s+(?P<speed>{_RATE}))?"
+    rf"(?:\s+ETA\s+(?P<eta>\S+))?"
 )
+
+# Total unknown: downloaded size, rate, elapsed — and no percentage at all.
+PROGRESS_SIZE_RE = re.compile(
+    rf"\[download\]\s+(?P<size>{_SIZE})\s+at\s+(?P<speed>{_RATE})"
+    rf"(?:\s+\((?P<elapsed>[\d:]+)\))?"
+)
+
+
+def parse_progress(line):
+    """{"pct", "size", "speed", "eta", "elapsed"} for a progress line, or
+    None. pct is None when yt-dlp doesn't know the total — the UI then
+    shows an indeterminate bar rather than a stuck percentage."""
+    m = PROGRESS_RE.search(line)
+    if not m:
+        m = PROGRESS_SIZE_RE.search(line)
+        if not m:
+            return None
+    groups = m.groupdict()
+    pct = groups.get("pct")
+    return {
+        "pct": float(pct) if pct is not None else None,
+        "size": _tidy(groups.get("size")),
+        "speed": "" if (groups.get("speed") or "").lower().startswith("unknown") else _tidy(groups.get("speed")),
+        "eta": "" if (groups.get("eta") or "").lower() == "unknown" else (groups.get("eta") or ""),
+        "elapsed": groups.get("elapsed") or "",
+    }
+
+
+def _tidy(text):
+    """yt-dlp pads its numbers ("~   1.00KiB"); collapse that for display."""
+    return re.sub(r"\s+", "", text or "")
 
 # Per `yt-dlp --help`: valid for --sponsorblock-mark but not --sponsorblock-remove.
 SPONSORBLOCK_MARK_ONLY = {"poi_highlight", "chapter"}
@@ -431,6 +474,7 @@ def build_args(binary, settings, dest, section=None, slots=None):
     fmt = settings.get("format", {})
     filename = settings.get("filename", {})
     playlist = settings.get("playlist", {})
+    live = settings.get("live", {})
     subs = settings.get("subtitles", {})
     thumb = settings.get("thumbnail", {})
     audio = settings.get("audio", {})
@@ -531,6 +575,10 @@ def build_args(binary, settings, dest, section=None, slots=None):
         args.append("--no-playlist")
     if playlist.get("maxDownloads"):
         args += ["--max-downloads", str(playlist["maxDownloads"])]
+    if live.get("fromStart"):
+        args.append("--live-from-start")
+    if live.get("waitForVideo"):
+        args += ["--wait-for-video", str(live["waitForVideo"]).strip()]
     if playlist.get("skipDownloaded"):
         args += ["--download-archive", archive_path()]
         if playlist.get("breakOnExisting"):
@@ -1083,8 +1131,26 @@ def summarize_info(data, downloaded=frozenset()):
         "formats": summarize_formats(data.get("formats")),
         "chapters": summarize_chapters(data.get("chapters")),
         "subtitles": summarize_subtitles(data),
+        "live": live_state(data),
         "downloaded": archive_line(data) in downloaded,
     }
+
+
+LIVE_LABELS = {"is_live": "live", "is_upcoming": "upcoming", "post_live": "just ended", "was_live": "was live"}
+
+
+def live_state(data):
+    """{"state", "label", "startsAt"} for a stream, or None for an
+    ordinary video. `startsAt` is the scheduled unix time of an upcoming
+    one, which the UI turns into a local time."""
+    status = data.get("live_status")
+    if not status and data.get("is_live"):
+        status = "is_live"
+    if status not in LIVE_LABELS:
+        return None
+    starts = data.get("release_timestamp")
+    return {"state": status, "label": LIVE_LABELS[status],
+            "startsAt": int(starts) if isinstance(starts, (int, float)) else None}
 
 
 def summarize_subtitles(data):
@@ -1294,16 +1360,11 @@ def run_download_job(job, emit):
         if title and not job["title"]:
             job["title"] = title
             emit("ytdlp-title", {"jobId": job["id"], "title": title})
-        m = PROGRESS_RE.search(line)
-        if m:
-            job["pct"] = float(m.group("pct"))
-            emit("ytdlp-progress", {
-                "jobId": job["id"],
-                "pct": job["pct"],
-                "size": m.group("size"),
-                "speed": m.group("speed") or "",
-                "eta": m.group("eta") or "",
-            })
+        progress = parse_progress(line)
+        if progress:
+            if progress["pct"] is not None:
+                job["pct"] = progress["pct"]
+            emit("ytdlp-progress", dict(progress, jobId=job["id"]))
     return proc.wait()
 
 
