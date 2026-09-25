@@ -138,4 +138,4 @@ python3 -m pytest tests/ -v
 node --test tests/test_utils.js
 ```
 
-Both run in CI (`.github/workflows/tests.yml`) on macOS and Linux for the Python suite, Linux for the JS one.
+Both run in CI (`.github/workflows/tests.yml`): the Python suite on macOS and Linux across Python 3.9, 3.11 and 3.13, the JS one on Linux. Two more jobs cover what the suite can't reach — a lint pass (the extension's JavaScript parses, both manifests are valid JSON, the Firefox symlinks resolve, every shell script parses and passes shellcheck) and an install-scripts pass that registers the native host against a fake browser profile, adds and removes the applications-menu entry, and runs `uninstall.sh`. Pushing a `v*` tag runs `.github/workflows/release.yml`, which refuses to publish if the tag disagrees with `VERSION` in `app.py` and attaches a source archive.

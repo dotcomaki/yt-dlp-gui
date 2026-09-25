@@ -11,13 +11,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
+        python-version: ["3.9", "3.11", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       # pywebview needs a real GTK/WebKit2 backend on Linux (there's no
       # bundled engine the way macOS's WKWebView or Windows's WebView2
@@ -47,3 +48,94 @@ jobs:
 
       - name: Run tests
         run: node --test tests/test_utils.js
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The extension is never exercised by the test suite — it only runs
+      # inside a browser — so at least catch syntax errors and a manifest
+      # that isn't valid JSON before they reach someone's browser.
+      - name: Check the extension's JavaScript parses
+        run: |
+          for f in extension/*.js; do node --check "$f"; echo "ok: $f"; done
+
+      - name: Check the manifests are valid JSON
+        run: |
+          for f in extension/manifest.json firefox-extension/manifest.json; do
+            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"
+            echo "ok: $f"
+          done
+
+      # firefox-extension/ shares the Chrome files by symlink; a broken one
+      # would ship an extension that silently does nothing.
+      - name: Check the Firefox symlinks resolve
+        run: |
+          status=0
+          for f in firefox-extension/*; do
+            if [ -L "$f" ] && [ ! -e "$f" ]; then echo "broken symlink: $f"; status=1; fi
+          done
+          exit $status
+
+      - name: Check the shell scripts parse
+        run: |
+          for f in $(git ls-files '*.sh' '*.command' 'yt-dlp.app/Contents/MacOS/yt-dlp'); do
+            bash -n "$f" && echo "ok: $f"
+          done
+
+      - name: Shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          # SC1091: sourced files aren't followed here. SC2086: intentional
+          # word splitting for package lists in install.sh.
+          shellcheck -e SC1091,SC2086 $(git ls-files '*.sh' '*.command') || true
+
+      - name: The app bundle's launcher must stay executable
+        run: test -x yt-dlp.app/Contents/MacOS/yt-dlp
+
+  install-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # linux/install.sh writes the native messaging host manifest into
+      # whichever browser config directories exist. Nothing else runs it,
+      # so give it a fake one and check what it produced.
+      - name: Register the native host against a fake browser profile
+        run: |
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/config"
+          mkdir -p "$XDG_CONFIG_HOME/chromium"
+          ./linux/install.sh
+          manifest="$XDG_CONFIG_HOME/chromium/NativeMessagingHosts/com.dotcomaki.ytdlpgui.json"
+          test -f "$manifest"
+          python3 - "$manifest" <<'PY'
+          import json, os, sys
+          m = json.load(open(sys.argv[1]))
+          assert m["name"] == "com.dotcomaki.ytdlpgui", m
+          assert m["type"] == "stdio", m
+          assert os.path.isfile(m["path"]), m["path"]
+          assert m["allowed_origins"], m
+          print("manifest ok:", m["path"])
+          PY
+
+      - name: Add and remove the applications-menu entry
+        run: |
+          export XDG_DATA_HOME="$RUNNER_TEMP/share"
+          ./linux/install-desktop.sh
+          entry="$XDG_DATA_HOME/applications/ytdlp-gui.desktop"
+          test -f "$entry"
+          grep -q '^Exec="' "$entry"    # paths must be quoted per the desktop spec
+          test -f "$XDG_DATA_HOME/icons/hicolor/256x256/apps/ytdlp-gui.png"
+          ./linux/uninstall-desktop.sh
+          test ! -f "$entry"
+
+      - name: Uninstall cleanly
+        run: |
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/config"
+          ./uninstall.sh
+          test ! -f "$XDG_CONFIG_HOME/chromium/NativeMessagingHosts/com.dotcomaki.ytdlpgui.json"

@@ -204,3 +204,19 @@ def test_a_runtime_dir_that_is_too_long_is_skipped_too(sock_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", os.path.join(short, "x" * 120))
     monkeypatch.setenv("XDG_CONFIG_HOME", short)
     assert app.instance_socket_path() == os.path.join(short, "ytdlp-gui", "app.sock")
+
+
+# --- the URL a cold start is handed (#37) ---------------------------------------
+
+@pytest.mark.parametrize("url", [
+    "https://www.youtube.com/watch?v=abc&list=PL1&index=2",   # & would split the query
+    "https://example.com/a b c.mp4",                          # spaces
+    "https://example.com/p?q=a#frag",                         # # would truncate it
+    "https://example.com/Ünïcødé/видео",
+    "https://example.com/100%25",
+])
+def test_the_entry_url_round_trips_through_the_query_string(url):
+    import urllib.parse
+    entry = "ui/index.html?url=" + urllib.parse.quote(url, safe="")
+    query = urllib.parse.urlparse(entry).query
+    assert urllib.parse.parse_qs(query)["url"] == [url]
