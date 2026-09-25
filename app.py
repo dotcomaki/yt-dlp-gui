@@ -260,7 +260,7 @@ def history_path():
 
 # This app's own version, and where its releases are announced. Bumped
 # when a release is cut; CI checks the tag and this agree.
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 APP_RELEASES_API = "https://api.github.com/repos/dotcomaki/yt-dlp-gui/releases/latest"
 
 
