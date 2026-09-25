@@ -8,6 +8,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import re
@@ -1660,14 +1661,20 @@ class Api:
     def set_window(self, window):
         self.window = window
 
-    def add_urls(self, urls):
-        """URLs handed over by a later launch (the extension clicked while
-        the app was open). Runs on the instance-server thread; pywebview's
+    def add_urls(self, urls, options=None):
+        """URLs handed over by a later launch (the extension used while the
+        app was open). Runs on the instance-server thread; pywebview's
         evaluate_js/show are safe to call from there."""
         if not self.window:
             return
+        options = options or {}
         if urls:
-            self.window.evaluate_js(f"receiveUrls({json.dumps(list(urls))})")
+            self.window.evaluate_js(
+                f"receiveUrls({json.dumps(list(urls))}, {json.dumps(options)})")
+        # "Download now" from the popup means the app should get on with it,
+        # not jump in front of whatever the user is doing.
+        if options.get("enqueue"):
+            return
         try:
             self.window.restore()   # un-minimize if needed
             self.window.show()      # and bring to the front (activates the app on macOS)
@@ -2074,26 +2081,35 @@ class AlreadyRunning(Exception):
     pass
 
 
+# sockaddr_un is 104 bytes on macOS, 108 on Linux; a deeply nested config
+# or runtime directory can overrun it, and bind() then fails.
+MAX_SOCKET_PATH = 100
+
+
 def instance_socket_path():
     """XDG_RUNTIME_DIR is the proper home for a per-user socket (tmpfs,
     cleared at logout); macOS has no such thing, so the config dir is the
-    fallback."""
+    fallback — and a short path in the temp dir if even that is too long
+    to fit in a Unix socket address."""
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    if runtime and os.path.isdir(runtime):
-        return os.path.join(runtime, "ytdlp-gui.sock")
-    return config_path("app.sock")
+    for path in ([os.path.join(runtime, "ytdlp-gui.sock")] if runtime and os.path.isdir(runtime) else []) + [config_path("app.sock")]:
+        if len(path) <= MAX_SOCKET_PATH:
+            return path
+    return os.path.join(tempfile.gettempdir(), f"ytdlp-gui-{os.getuid()}.sock")
 
 
-def send_to_running_instance(urls, path=None, timeout=2.0):
+def send_to_running_instance(urls, path=None, timeout=2.0, options=None):
     """Hand `urls` to a running app. True only if it acknowledged; False
     for no socket, a stale socket file, or anything else — the caller
-    then launches normally."""
+    then launches normally. `options` carries what the extension popup
+    asked for: a profile to apply, and whether to start straight away."""
     path = path or instance_socket_path()
+    payload = dict(options or {}, urls=list(urls))
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(timeout)
             s.connect(path)
-            s.sendall((json.dumps({"urls": list(urls)}) + "\n").encode("utf-8"))
+            s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             reply = s.makefile("r", encoding="utf-8").readline()
         return bool(reply) and json.loads(reply).get("ok") is True
     except (OSError, ValueError):
@@ -2101,8 +2117,9 @@ def send_to_running_instance(urls, path=None, timeout=2.0):
 
 
 class InstanceServer:
-    """One JSON line per connection — {"urls": [...]} — answered with
-    {"ok": true} after `handler(urls)` has run on the server thread."""
+    """One JSON line per connection — {"urls": [...], "profile": ...,
+    "enqueue": ...} — answered with {"ok": true} after `handler(urls,
+    options)` has run on the server thread."""
 
     def __init__(self, handler, path=None):
         self.handler = handler
@@ -2153,9 +2170,12 @@ class InstanceServer:
                     line = conn.makefile("r", encoding="utf-8").readline()
                     if not line.strip():
                         continue   # a liveness probe, nothing to do
-                    urls = json.loads(line).get("urls") or []
-                    urls = [u for u in urls if isinstance(u, str) and u.strip()]
-                    self.handler(urls)
+                    message = json.loads(line)
+                    urls = [u for u in (message.get("urls") or []) if isinstance(u, str) and u.strip()]
+                    self.handler(urls, {
+                        "profile": message.get("profile") or "",
+                        "enqueue": bool(message.get("enqueue")),
+                    })
                     conn.sendall(b'{"ok": true}\n')
                 except Exception as e:
                     try:
@@ -2204,25 +2224,51 @@ def startup_background(settings):
     return WINDOW_BACKGROUNDS.get(appearance, WINDOW_BACKGROUNDS["dark"])
 
 
+def parse_argv(argv):
+    """(url, options) from the command line. The extension's popup passes
+    the same choices a running app receives over the socket."""
+    url, options = "", {"profile": "", "enqueue": False}
+    rest = list(argv)
+    while rest:
+        arg = rest.pop(0)
+        if arg == "--profile" and rest:
+            options["profile"] = rest.pop(0)
+        elif arg.startswith("--profile="):
+            options["profile"] = arg.split("=", 1)[1]
+        elif arg == "--enqueue":
+            options["enqueue"] = True
+        elif not url and not arg.startswith("-"):
+            url = arg
+    return url, options
+
+
 def main():
-    initial_url = sys.argv[1] if len(sys.argv) > 1 else ""
+    initial_url, options = parse_argv(sys.argv[1:])
     # Already open? Hand the URL over and get out of the way. With no URL
     # this just brings the existing window forward.
-    if send_to_running_instance([initial_url] if initial_url else []):
+    if send_to_running_instance([initial_url] if initial_url else [], options=options):
         return
 
     entry = "ui/index.html"
     if initial_url:
         entry += "?url=" + urllib.parse.quote(initial_url, safe="")
+        if options["profile"]:
+            entry += "&profile=" + urllib.parse.quote(options["profile"], safe="")
+        if options["enqueue"]:
+            entry += "&enqueue=1"
 
     api = Api()
     api.restore_queue()
     server = InstanceServer(api.add_urls)
     try:
         server.start()
+    except OSError:
+        # No socket (an unwritable or impossibly long path): later launches
+        # can't hand over, but that's no reason not to open a window.
+        server = None
     except AlreadyRunning:
         # Lost a race with another launch between the probe above and bind.
-        if send_to_running_instance([initial_url] if initial_url else []):
+        if send_to_running_instance([initial_url] if initial_url else [], options=options):
             return
         server = None   # can't serve, but a window is still better than nothing
     window = webview.create_window(

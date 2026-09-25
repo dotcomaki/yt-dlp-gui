@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "yt-dlp Quick Download",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Send the current tab, or any link, to the yt-dlp GUI app",
   "browser_specific_settings": {
     "gecko": {
@@ -13,15 +13,17 @@
     "nativeMessaging",
     "tabs",
     "activeTab",
-    "contextMenus"
+    "contextMenus",
+    "storage"
   ],
   "action": {
-    "default_title": "Download with yt-dlp",
+    "default_title": "Send to yt-dlp",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
       "128": "icon128.png"
-    }
+    },
+    "default_popup": "popup.html"
   },
   "icons": {
     "16": "icon16.png",
@@ -33,7 +35,7 @@
       "suggested_key": {
         "default": "Alt+Shift+Y"
       },
-      "description": "Send the current tab to yt-dlp"
+      "description": "Open the yt-dlp popup for this tab"
     }
   },
   "background": {

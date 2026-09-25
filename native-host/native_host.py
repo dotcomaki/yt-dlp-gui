@@ -12,6 +12,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_SCRIPT = os.path.join(PROJECT_DIR, "app.py")
@@ -84,32 +85,61 @@ def send_message(obj):
     sys.stdout.buffer.flush()
 
 
+def config_dir():
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(config_home, "ytdlp-gui")
+
+
+def read_profile_names():
+    """The saved profile names, for the popup's dropdown. Read straight
+    from the file the app writes — the app may not even be running."""
+    try:
+        with open(os.path.join(config_dir(), "profiles.json")) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    profiles = data.get("profiles") if isinstance(data, dict) else None
+    if not isinstance(profiles, dict):
+        return []
+    return sorted(profiles, key=str.lower)
+
+
+MAX_SOCKET_PATH = 100   # sockaddr_un is 104 bytes on macOS, 108 on Linux
+
+
 def instance_socket_path():
     """Must match app.py's instance_socket_path() — duplicated rather than
     imported because this host may run under a python without pywebview,
-    and app.py imports webview at the top."""
+    and app.py imports webview at the top. That includes the fallback for
+    paths too long to fit in a socket address, or the two would disagree
+    about where to talk and every hand-off would silently launch instead."""
     runtime = os.environ.get("XDG_RUNTIME_DIR")
+    candidates = []
     if runtime and os.path.isdir(runtime):
-        return os.path.join(runtime, "ytdlp-gui.sock")
-    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return os.path.join(config_home, "ytdlp-gui", "app.sock")
+        candidates.append(os.path.join(runtime, "ytdlp-gui.sock"))
+    candidates.append(os.path.join(config_dir(), "app.sock"))
+    for path in candidates:
+        if len(path) <= MAX_SOCKET_PATH:
+            return path
+    return os.path.join(tempfile.gettempdir(), "ytdlp-gui-%d.sock" % os.getuid())
 
 
-def send_to_running_instance(url):
+def send_to_running_instance(url, profile="", enqueue=False):
     """True if a running app took the URL; False if nothing is listening
     (no socket, a stale one, or no reply) — then launch instead."""
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(2.0)
             s.connect(instance_socket_path())
-            s.sendall((json.dumps({"urls": [url]}) + "\n").encode("utf-8"))
+            payload = {"urls": [url], "profile": profile, "enqueue": enqueue}
+            s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             reply = s.makefile("r", encoding="utf-8").readline()
         return bool(reply) and json.loads(reply).get("ok") is True
     except (OSError, ValueError):
         return False
 
 
-def launch(url):
+def launch(url, profile="", enqueue=False):
     # macOS: hand the launch off to LaunchServices via `open -a` instead of
     # spawning python3 as a direct child of this process. A direct child
     # inherits the browser's process ancestry for macOS's Gatekeeper
@@ -120,8 +150,14 @@ def launch(url):
     # breaking that ancestry chain. Requires yt-dlp.app to exist (it's a
     # thin, self-locating wrapper checked into the repo, no /Applications
     # install needed).
+    args = [url]
+    if profile:
+        args += ["--profile", profile]
+    if enqueue:
+        args.append("--enqueue")
+
     if platform.system() == "Darwin" and os.path.isdir(APP_BUNDLE):
-        subprocess.Popen(["open", "-a", APP_BUNDLE, "--args", url])
+        subprocess.Popen(["open", "-a", APP_BUNDLE, "--args", *args])
         return
 
     # Linux (and a macOS fallback if yt-dlp.app is somehow missing): spawn
@@ -129,7 +165,7 @@ def launch(url):
     # equivalent on Linux, so this doesn't have the same failure mode.
     python_bin = find_python()
     subprocess.Popen(
-        [python_bin, APP_SCRIPT, url],
+        [python_bin, APP_SCRIPT, *args],
         cwd=PROJECT_DIR,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -138,21 +174,29 @@ def launch(url):
     )
 
 
-def deliver(url):
+def deliver(url, profile="", enqueue=False):
     """How the URL got there: 'running' (handed to the open app) or
     'launched' (a fresh app started with it)."""
-    if send_to_running_instance(url):
+    if send_to_running_instance(url, profile, enqueue):
         return "running"
-    launch(url)
+    launch(url, profile, enqueue)
     return "launched"
 
 
-def main():
-    message = read_message()
+def handle(message):
+    # The popup asks for the profile list before it shows itself; the
+    # toolbar icon and context menu just send a URL.
+    if message.get("action") == "profiles":
+        return {"ok": True, "profiles": read_profile_names()}
     url = message.get("url", "")
+    if not url:
+        return {"ok": False, "error": "no URL"}
+    return {"ok": True, "delivered": deliver(url, message.get("profile") or "", bool(message.get("enqueue")))}
 
+
+def main():
     try:
-        send_message({"ok": True, "delivered": deliver(url)})
+        send_message(handle(read_message()))
     except Exception as e:
         send_message({"ok": False, "error": str(e)})
 

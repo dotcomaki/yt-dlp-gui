@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --bg: #1c1c1e; --field: #262628; --border: #333335;
+    --text: #e4e4e6; --dim: #8a8a90; --accent: #0a84ff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff; --field: #ffffff; --border: #d4d4d8;
+      --text: #1c1c1e; --dim: #6b6b75; --accent: #0066cc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    width: 300px;
+    margin: 0;
+    padding: 12px;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  label { display: block; font-size: 11px; color: var(--dim); margin-bottom: 4px; }
+  input, select {
+    width: 100%;
+    background: var(--field);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  .row { display: flex; gap: 8px; }
+  button {
+    flex: 1;
+    border: 1px solid var(--border);
+    background: var(--field);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { margin-top: 9px; font-size: 11.5px; color: var(--dim); min-height: 15px; }
+  .status.err { color: #ff453a; }
+</style>
+</head>
+<body>
+  <label for="url">URL</label>
+  <input type="text" id="url" spellcheck="false" />
+  <label for="profile">Profile</label>
+  <select id="profile"><option value="">Current settings</option></select>
+  <div class="row">
+    <button class="primary" id="now">Download now</button>
+    <button id="open">Open in app</button>
+  </div>
+  <div class="status" id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

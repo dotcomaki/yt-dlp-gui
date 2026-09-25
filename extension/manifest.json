@@ -1,22 +1,24 @@
 {
   "manifest_version": 3,
   "name": "yt-dlp Quick Download",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Send the current tab, or any link, to the yt-dlp GUI app",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0r/rvVv5cofFX/ITQayIXd7BdV/Bc4LKDiDrqdvVqI7Z+k5XUmSxQnvLpMAM/w05nNRSW+Mh0W9MyPSwuL8aSXSLbQJknm5Ek1rW4FION+6sRQNdYaq9/Zdj+lT7GHygfBbF/dbw4b2sVlu0KKqlCC76Xrtx9ToseHMxGaO+YSncK3Zb90SLy5jiIuULigEna9PerLpUpd5ctVYjVilwoUEMo8RfJCu5nW1KLOttt2KBAm/YSMshKF5vjkjZ60LUldUX9ucsInV6odHh+Rq6cDWdh2pQ+axS8ov+luJrcj0wcPVPsYqm5L9j+p9Bdz0dRkiPIKsaZVaGZkreZ72zxwIDAQAB",
   "permissions": [
     "nativeMessaging",
     "tabs",
     "activeTab",
-    "contextMenus"
+    "contextMenus",
+    "storage"
   ],
   "action": {
-    "default_title": "Download with yt-dlp",
+    "default_title": "Send to yt-dlp",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
       "128": "icon128.png"
-    }
+    },
+    "default_popup": "popup.html"
   },
   "icons": {
     "16": "icon16.png",
@@ -28,7 +30,7 @@
       "suggested_key": {
         "default": "Alt+Shift+Y"
       },
-      "description": "Send the current tab to yt-dlp"
+      "description": "Open the yt-dlp popup for this tab"
     }
   },
   "background": {

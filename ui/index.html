@@ -2848,10 +2848,19 @@
   // URLs arriving from outside: the ?url= prefill on a cold start, or a
   // later launch (extension clicked while the app is open) handing over
   // through Api.add_urls. Lines already in the box aren't repeated.
-  function receiveUrls(urls) {
+  function receiveUrls(urls, options) {
+    options = options || {};
+    // The popup can name a profile; apply it before anything is queued, so
+    // the job's settings snapshot is the one the user picked.
+    if (options.profile && profiles[options.profile]) {
+      applyPayload(profiles[options.profile]);
+      activeProfile = options.profile;
+      renderProfiles();
+      saveSettings();
+    }
     const fresh = urls.filter(u => u && !parseUrls(urlInput.value).includes(u));
     if (!fresh.length) return;
-    if (settings.extension && settings.extension.autoEnqueue) {
+    if (options.enqueue || (settings.extension && settings.extension.autoEnqueue)) {
       startBatch(fresh, settings, folderInput.value);
       switchTab('download');
       return;
@@ -2897,8 +2906,9 @@
     renderTemplateExample();   // needs the folder, which is only known now
 
     // After the folder is known — with auto-enqueue on, this starts a download.
-    const prefillUrl = new URLSearchParams(window.location.search).get('url');
-    if (prefillUrl) receiveUrls([prefillUrl]);
+    const params = new URLSearchParams(window.location.search);
+    const prefillUrl = params.get('url');
+    if (prefillUrl) receiveUrls([prefillUrl], { profile: params.get('profile') || '', enqueue: params.get('enqueue') === '1' });
 
     try {
       const configs = await window.pywebview.api.ytdlp_config_files();

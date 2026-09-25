@@ -57,9 +57,10 @@ function installMenu() {
 chrome.runtime.onInstalled.addListener(() => { syncAllTabs(); installMenu(); });
 chrome.runtime.onStartup.addListener(syncAllTabs);
 
-// A click has no visible result of its own (the app may be behind the
-// browser), so flash a badge: ✓ when the host took the URL, ! when it
-// didn't — otherwise a broken host registration looks like nothing.
+// A context-menu click has no visible result of its own (the app may be
+// behind the browser), so flash a badge: ✓ when the host took the URL,
+// ! when it didn't — otherwise a broken host registration looks like
+// nothing. The popup reports for itself.
 function flashBadge(tabId, ok) {
   chrome.action.setBadgeBackgroundColor({ tabId, color: ok ? "#32d74b" : "#ff453a" });
   chrome.action.setBadgeText({ tabId, text: ok ? "✓" : "!" });
@@ -78,8 +79,8 @@ function sendUrl(url, tabId) {
   });
 }
 
-chrome.action.onClicked.addListener((tab) => sendUrl(tab.url, tab.id));
-
+// With a default_popup set, onClicked never fires — the popup drives the
+// toolbar button now. The context menu is still a direct send.
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== MENU_ID) return;
   // A link's target beats the media element's src beats the page: a
