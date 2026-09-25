@@ -173,6 +173,56 @@ def find_js_runtime():
     return None
 
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+NATIVE_HOST_NAME = "com.dotcomaki.ytdlpgui"
+
+
+def native_host_dirs():
+    """Every directory the installers can write the host manifest to, on
+    either OS. Looking for all of them anywhere is harmless."""
+    home = os.path.expanduser("~")
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    support = os.path.join(home, "Library", "Application Support")
+    return [
+        os.path.join(support, "Google", "Chrome", "NativeMessagingHosts"),
+        os.path.join(support, "Arc", "User Data", "NativeMessagingHosts"),
+        os.path.join(support, "BraveSoftware", "Brave-Browser", "NativeMessagingHosts"),
+        os.path.join(support, "Microsoft Edge", "NativeMessagingHosts"),
+        os.path.join(support, "Chromium", "NativeMessagingHosts"),
+        os.path.join(support, "Vivaldi", "NativeMessagingHosts"),
+        os.path.join(support, "Mozilla", "NativeMessagingHosts"),
+        os.path.join(config_home, "google-chrome", "NativeMessagingHosts"),
+        os.path.join(config_home, "google-chrome-beta", "NativeMessagingHosts"),
+        os.path.join(config_home, "chromium", "NativeMessagingHosts"),
+        os.path.join(config_home, "BraveSoftware", "Brave-Browser", "NativeMessagingHosts"),
+        os.path.join(config_home, "microsoft-edge", "NativeMessagingHosts"),
+        os.path.join(config_home, "vivaldi", "NativeMessagingHosts"),
+        os.path.join(home, ".mozilla", "native-messaging-hosts"),
+    ]
+
+
+def native_host_status(project_dir=None):
+    """Whether the browser extension can still reach this copy of the app.
+
+    The manifests hold an absolute path to native_host.py, so moving or
+    renaming the project leaves them pointing at nothing and the extension
+    fails with no useful message. Returns {installed, stale, ok}: `stale`
+    lists manifests pointing somewhere other than this checkout."""
+    expected = os.path.realpath(os.path.join(project_dir or PROJECT_DIR, "native-host", "native_host.py"))
+    installed, stale = [], []
+    for directory in native_host_dirs():
+        manifest = os.path.join(directory, NATIVE_HOST_NAME + ".json")
+        try:
+            with open(manifest) as f:
+                path = json.load(f).get("path") or ""
+        except (OSError, ValueError):
+            continue
+        installed.append(manifest)
+        if os.path.realpath(path) != expected:
+            stale.append(manifest)
+    return {"installed": len(installed), "stale": stale, "ok": not stale}
+
+
 def config_path(name):
     config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     config_dir = os.path.join(config_home, "ytdlp-gui")
@@ -1816,6 +1866,34 @@ class Api:
             return True
         except Exception:
             return False   # a read-only config dir must not take the queue down (worker thread)
+
+    def native_host_status(self):
+        return native_host_status()
+
+    def reinstall_native_host(self):
+        """Re-run the installer that writes the manifests, which is all it
+        takes to point the browser back at this copy."""
+        script = os.path.join(PROJECT_DIR, "native-host" if sys.platform == "darwin" else "linux", "install.sh")
+        if not os.path.isfile(script):
+            return {"ok": False, "error": f"{os.path.basename(script)} is missing"}
+        try:
+            proc = subprocess.run([script], capture_output=True, text=True, timeout=60, cwd=PROJECT_DIR)
+        except (OSError, subprocess.SubprocessError) as e:
+            return {"ok": False, "error": str(e)}
+        for line in (proc.stdout + proc.stderr).splitlines():
+            if line.strip():
+                self._emit("ytdlp-log", {"line": line})
+        if proc.returncode != 0:
+            return {"ok": False, "error": f"the installer exited with code {proc.returncode}"}
+        # Firefox keeps its own manifest; re-run that installer too if it
+        # was ever used (the file is only there if it was).
+        firefox = os.path.join(PROJECT_DIR, "firefox-extension", "install.sh")
+        if os.path.isfile(firefox) and any("Mozilla" in m or ".mozilla" in m for m in native_host_status()["stale"]):
+            try:
+                subprocess.run([firefox], capture_output=True, text=True, timeout=60, cwd=PROJECT_DIR)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return {"ok": True, "status": native_host_status()}
 
     def ytdlp_config_files(self):
         """The config files yt-dlp would read, that actually exist — so the

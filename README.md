@@ -32,6 +32,17 @@ The sections below are what `install.sh` is actually doing under the hood, usefu
 - A JavaScript runtime — YouTube now requires one (yt-dlp runs the player's challenge-solving JS through it); without one yt-dlp warns on every YouTube download and some formats are missing. `deno` is what yt-dlp recommends (`brew install deno`, `sudo apt install deno`, or `curl -fsSL https://deno.land/install.sh | sh`); `node` works too (`brew install node`, `sudo apt install nodejs`, or an nvm install). The app looks on your `PATH`, in the Homebrew/`/usr/local`/`/usr/bin` locations, `~/.deno/bin`, `~/.bun/bin` and the newest `~/.nvm/versions/node/*`, and passes what it finds to yt-dlp as `--js-runtimes` — same as it passes `--ffmpeg-location` — because apps launched from the browser extension get a minimal `PATH` that yt-dlp's own search doesn't cope with. The sidebar shows which one is in use.
 - `yt-dlp` on your `PATH` (or, macOS only, at `/usr/local/bin/yt-dlp` or `~/Downloads/yt-dlp_macos`)
 
+## Uninstalling
+
+```bash
+./uninstall.sh            # native-host manifests, the venv, the app entry
+./uninstall.sh --purge    # ...and ~/.config/ytdlp-gui (settings, history, profiles)
+```
+
+or double-click `uninstall.command` on macOS. It leaves yt-dlp, ffmpeg and the browser extension itself alone — remove the extension from your browser's extensions page.
+
+**If you move or rename this folder**, the browser keeps pointing at the old location and the extension stops working with no error anywhere. The app notices on launch and offers a **Re-link extension** button in the sidebar; `./native-host/install.sh` (or `./linux/install.sh`) does the same thing from a terminal.
+
 ## Launching it
 
 `./install.sh` links the app into `~/Applications` on macOS, so **yt-dlp GUI** shows up in Spotlight and Launchpad with its own Dock icon — drag it to the Dock to keep it there. It's a symlink, not a copy: the bundle finds the project relative to itself.
@@ -67,7 +78,7 @@ Clicking the extension's toolbar icon opens a small popup with the current tab's
    ```bash
    ./linux/install.sh
    ```
-   Each generates the host manifest with an absolute path to `native_host.py` on your machine (Chrome's native messaging spec requires an absolute path — there's no portable form) and installs it into every detected Chromium browser's config directory for that OS (macOS: `~/Library/Application Support/...`; Linux: `~/.config/...`). The generated file itself isn't committed to git since it's machine-specific; re-run the appropriate script any time you re-clone or move the project.
+   Each generates the host manifest with an absolute path to `native_host.py` on your machine (Chrome's native messaging spec requires an absolute path — there's no portable form) and installs it into every detected Chromium browser's config directory for that OS (macOS: `~/Library/Application Support/...`; Linux: `~/.config/...`). The generated file itself isn't committed to git since it's machine-specific; re-run the appropriate script any time you re-clone or move the project — or use the **Re-link extension** button the app shows when it notices the mismatch.
 2. Fully quit and relaunch your browser
 3. Go to `chrome://extensions` (this URL works in every Chromium-based browser, not just Chrome — Arc, Brave, Edge, Vivaldi too), enable **Developer mode**, click **Load unpacked**, and select the `extension/` folder
 4. Pin the extension's icon to the toolbar

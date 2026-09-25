@@ -746,6 +746,8 @@
           <button class="small-btn update-btn" id="ytdlpCacheBtn" title="yt-dlp --rm-cache-dir — the usual first step for 403s and signature errors">Clear cache</button>
         </div>
         <div class="status-line" id="configStatusLine" hidden><span class="status-dot err"></span><span id="configStatusText"></span></div>
+        <div class="status-line" id="hostStatusLine" hidden><span class="status-dot warn"></span><span id="hostStatusText"></span></div>
+        <button class="small-btn update-btn" id="hostFixBtn" hidden>Re-link extension</button>
       </div>
     </div>
 
@@ -2414,6 +2416,28 @@
     }];
   }
 
+  // --- Native host re-link -------------------------------------------------------
+  const hostStatusLine = document.getElementById('hostStatusLine');
+  const hostStatusText = document.getElementById('hostStatusText');
+  const hostFixBtn = document.getElementById('hostFixBtn');
+
+  hostFixBtn.addEventListener('click', async () => {
+    hostFixBtn.disabled = true;
+    hostStatusText.textContent = 'Re-linking…';
+    switchTab('log');
+    const result = await window.pywebview.api.reinstall_native_host();
+    if (result.ok) {
+      hostStatusLine.hidden = true;
+      hostFixBtn.hidden = true;
+      appendLog('Extension re-linked to this folder. Fully quit and relaunch your browser.', 'ok-line');
+    } else {
+      hostStatusText.textContent = 'Re-link failed';
+      hostStatusLine.title = result.error || '';
+      appendLog(`Couldn't re-link the extension: ${result.error}`, 'err-line');
+      hostFixBtn.disabled = false;
+    }
+  });
+
   // --- Appearance --------------------------------------------------------------
   // The stylesheet defaults to dark and follows the system in a media
   // query; data-theme pins it when the user has chosen one.
@@ -2917,6 +2941,18 @@
         note.className = 'hint';
         note.textContent = `Found on this machine: ${configs.join(', ')}`;
         document.getElementById('configFileHint').after(note);
+      }
+    } catch (err) {}
+
+    // The host manifests hold an absolute path to this folder, so moving or
+    // renaming it breaks the extension with no message anywhere. Say so.
+    try {
+      const host = await window.pywebview.api.native_host_status();
+      if (host.installed && !host.ok) {
+        hostStatusLine.hidden = false;
+        hostStatusText.textContent = 'Extension link is stale';
+        hostStatusLine.title = 'The browser still points at an old location for this app — most likely the folder moved or was renamed. Re-link to fix it.';
+        hostFixBtn.hidden = false;
       }
     } catch (err) {}
 
