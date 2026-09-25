@@ -1392,6 +1392,15 @@
                 <input type="checkbox" id="cb-ignoreErrors" data-bind="debug.ignoreErrors" />
                 <label for="cb-ignoreErrors">Ignore errors and continue</label>
               </div>
+              <div class="field">
+                <label>yt-dlp update channel</label>
+                <select data-bind="debug.updateChannel" id="updateChannelSelect">
+                  <option value="stable">Stable — the usual releases</option>
+                  <option value="nightly">Nightly — fixes days before they reach stable</option>
+                  <option value="master">Master — every commit, least tested</option>
+                </select>
+                <div class="hint" id="updateChannelHint">When a site breaks, the fix often lands on nightly well before the next stable release. Only the standalone yt-dlp binary can switch channels — a Homebrew, pip or distro install follows whatever its packager ships.</div>
+              </div>
               <div class="checkbox-row">
                 <input type="checkbox" id="cb-useConfigFile" data-bind="debug.useConfigFile" />
                 <label for="cb-useConfigFile">Also apply yt-dlp's own config file</label>
@@ -1497,7 +1506,7 @@
     sponsorblock: { mark: false, remove: false, categories: 'all' },
     geo: { disable: false, bypassCountry: '' },
     postrun: { exec: '' },
-    debug: { verbose: false, simulate: false, ignoreErrors: false, useConfigFile: false },
+    debug: { verbose: false, simulate: false, ignoreErrors: false, useConfigFile: false, updateChannel: 'stable' },
     notifications: { enabled: true },
     extension: { autoEnqueue: false },
     appearance: 'system',
@@ -1541,6 +1550,7 @@
       const handler = () => {
         const v = el.type === 'checkbox' ? el.checked : el.value;
         setPath(settings, path, v);
+        if (path === 'debug.updateChannel') checkForUpdate(false);   // "latest" now means a different feed
         if (path === 'audio.extractAudio') syncPresetFromAudioCheckbox();
         if (path === 'network.parallel') window.pywebview.api.set_parallel(v);
         saveSettings();
@@ -2120,7 +2130,7 @@
     try {
       // Pass the version we already know so the backend doesn't re-run
       // `yt-dlp --version` (slow on the standalone binary).
-      result = await window.pywebview.api.check_for_update(currentYtdlpVersion);
+      result = await window.pywebview.api.check_for_update(currentYtdlpVersion, settings);
     } catch (err) {
       result = { ok: false };
     }
@@ -2136,10 +2146,17 @@
     }
     latestUpdate = result;
     showYtdlpVersion(result.current);
+    // Say which channel the button would move you to when it isn't stable,
+    // and note when the choice can't apply to this install.
+    const channelNote = result.channelApplies && result.channel !== 'stable' ? ` (${result.channel})` : '';
+    const channelSelect = document.getElementById('updateChannelSelect');
+    channelSelect.title = (!result.channelApplies && result.channel !== 'stable')
+      ? `This is a ${result.method} install, so it follows that packager's builds instead of the ${result.channel} channel.`
+      : '';
     if (result.updateAvailable) {
       ytdlpDot.className = 'status-dot warn';
       ytdlpUpdateBtn.hidden = false;
-      ytdlpUpdateBtn.textContent = `Update to ${result.latest}`;
+      ytdlpUpdateBtn.textContent = `Update to ${result.latest}${channelNote}`;
       ytdlpUpdateBtn.title = result.canAutoUpdate
         ? `Runs: ${result.manualCommand}`
         : `Can't update automatically — ${result.manualCommand}`;
@@ -2166,7 +2183,7 @@
     updating = true;
     ytdlpUpdateBtn.disabled = true;
     ytdlpUpdateBtn.textContent = 'Updating…';
-    await window.pywebview.api.update_ytdlp();
+    await window.pywebview.api.update_ytdlp(settings);
   });
 
   window.addEventListener('ytdlp-update-done', (e) => {

@@ -204,7 +204,19 @@ def history_path():
     return config_path("history.json")
 
 
-YTDLP_RELEASES_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+# yt-dlp publishes its channels as separate repositories; the update check
+# has to look at the one the user actually follows, or every nightly build
+# looks "newer" than stable and vice versa.
+RELEASE_APIS = {
+    "stable": "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+    "nightly": "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest",
+    "master": "https://api.github.com/repos/yt-dlp/yt-dlp-master-builds/releases/latest",
+}
+
+
+def update_channel(settings):
+    channel = ((settings or {}).get("debug") or {}).get("updateChannel") or "stable"
+    return channel if channel in RELEASE_APIS else "stable"
 
 
 def ytdlp_version(path):
@@ -243,9 +255,9 @@ def _ssl_context():
         return ssl.create_default_context()
 
 
-def fetch_latest_version(timeout=5):
+def fetch_latest_version(timeout=5, channel="stable"):
     req = urllib.request.Request(
-        YTDLP_RELEASES_API,
+        RELEASE_APIS.get(channel, RELEASE_APIS["stable"]),
         headers={"User-Agent": "yt-dlp-gui", "Accept": "application/vnd.github+json"},
     )
     with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
@@ -286,10 +298,12 @@ def detect_install_method(path):
     return "pip", interpreter
 
 
-def update_command(method, path, interpreter=None):
-    """argv that updates this install, or None if it has to be done by hand."""
+def update_command(method, path, interpreter=None, channel="stable"):
+    """argv that updates this install, or None if it has to be done by hand.
+    Only the standalone binary can switch channels — a Homebrew or pip
+    install follows whatever its packager ships."""
     if method == "standalone":
-        return [path, "-U"]
+        return [path, "-U"] if channel == "stable" else [path, "--update-to", f"{channel}@latest"]
     if method == "homebrew":
         brew = shutil.which("brew") or _first_executable([
             "/opt/homebrew/bin/brew",
@@ -1829,7 +1843,7 @@ class Api:
             info.update({"found": False, "error": str(e)})
         return info
 
-    def check_for_update(self, current=None):
+    def check_for_update(self, current=None, settings=None):
         # `current` is the version check_binary() already reported — pass it
         # back in rather than re-running `yt-dlp --version`, which costs
         # several seconds on the standalone PyInstaller binary (it unpacks
@@ -1838,8 +1852,9 @@ class Api:
         if not path:
             return {"ok": False, "reason": "not-found"}
         try:
+            channel = update_channel(settings)
             current = current or ytdlp_version(path)
-            latest = fetch_latest_version()
+            latest = fetch_latest_version(channel=channel)
         except Exception as e:
             # Offline, rate-limited, GitHub down — none of these should
             # surface as an error in the UI, just skip the check.
@@ -1851,20 +1866,24 @@ class Api:
             "ok": True,
             "current": current,
             "latest": latest,
+            "channel": channel,
+            # Only the standalone binary follows a channel of its own; for
+            # the others the check is really "is the package out of date".
+            "channelApplies": method == "standalone",
             "updateAvailable": is_newer(latest, current),
             "method": method,
-            "canAutoUpdate": update_command(method, path, interpreter) is not None,
+            "canAutoUpdate": update_command(method, path, interpreter, channel) is not None,
             "manualCommand": MANUAL_UPDATE_HINTS[method],
         }
 
-    def update_ytdlp(self):
-        threading.Thread(target=self._run_update, daemon=True).start()
+    def update_ytdlp(self, settings=None):
+        threading.Thread(target=self._run_update, args=(update_channel(settings),), daemon=True).start()
         return True
 
-    def _run_update(self):
+    def _run_update(self, channel="stable"):
         path = find_ytdlp()
         method, interpreter = detect_install_method(path) if path else ("standalone", None)
-        cmd = update_command(method, path, interpreter) if path else None
+        cmd = update_command(method, path, interpreter, channel) if path else None
         if not cmd:
             self._emit("ytdlp-update-done", {
                 "success": False,

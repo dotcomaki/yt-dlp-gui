@@ -62,7 +62,7 @@ def test_fetch_latest_version_reads_tag_name(monkeypatch):
 
     monkeypatch.setattr(app.urllib.request, "urlopen", fake_urlopen)
     assert app.fetch_latest_version() == "2026.09.10"
-    assert captured["url"] == app.YTDLP_RELEASES_API
+    assert captured["url"] == app.RELEASE_APIS["stable"]
     # GitHub's API rejects requests with no User-Agent
     assert captured["ua"]
     # never block the UI indefinitely if GitHub is slow/unreachable
@@ -174,7 +174,7 @@ def test_every_method_has_a_manual_hint():
 def test_check_for_update_reports_update_available(monkeypatch):
     monkeypatch.setattr(app, "find_ytdlp", lambda: "/usr/local/bin/yt-dlp")
     monkeypatch.setattr(app, "ytdlp_version", lambda path: "2026.08.19")
-    monkeypatch.setattr(app, "fetch_latest_version", lambda: "2026.09.10")
+    monkeypatch.setattr(app, "fetch_latest_version", lambda **kw: "2026.09.10")
     monkeypatch.setattr(app, "detect_install_method", lambda path: ("standalone", None))
 
     result = app.Api().check_for_update()
@@ -182,6 +182,8 @@ def test_check_for_update_reports_update_available(monkeypatch):
         "ok": True,
         "current": "2026.08.19",
         "latest": "2026.09.10",
+        "channel": "stable",
+        "channelApplies": True,
         "updateAvailable": True,
         "method": "standalone",
         "canAutoUpdate": True,
@@ -198,7 +200,7 @@ def test_check_for_update_uses_supplied_version_without_rerunning_ytdlp(monkeypa
     def must_not_run(path):
         raise AssertionError("ytdlp_version() should not be called when current is supplied")
     monkeypatch.setattr(app, "ytdlp_version", must_not_run)
-    monkeypatch.setattr(app, "fetch_latest_version", lambda: "2026.09.10")
+    monkeypatch.setattr(app, "fetch_latest_version", lambda **kw: "2026.09.10")
     monkeypatch.setattr(app, "detect_install_method", lambda path: ("standalone", None))
 
     result = app.Api().check_for_update("2026.08.19")
@@ -209,7 +211,7 @@ def test_check_for_update_uses_supplied_version_without_rerunning_ytdlp(monkeypa
 def test_check_for_update_reports_up_to_date(monkeypatch):
     monkeypatch.setattr(app, "find_ytdlp", lambda: "/usr/local/bin/yt-dlp")
     monkeypatch.setattr(app, "ytdlp_version", lambda path: "2026.08.19")
-    monkeypatch.setattr(app, "fetch_latest_version", lambda: "2026.08.19")
+    monkeypatch.setattr(app, "fetch_latest_version", lambda **kw: "2026.08.19")
     monkeypatch.setattr(app, "detect_install_method", lambda path: ("standalone", None))
 
     result = app.Api().check_for_update()
@@ -220,7 +222,7 @@ def test_check_for_update_reports_up_to_date(monkeypatch):
 def test_check_for_update_flags_manual_only_installs(monkeypatch):
     monkeypatch.setattr(app, "find_ytdlp", lambda: "/usr/bin/yt-dlp")
     monkeypatch.setattr(app, "ytdlp_version", lambda path: "2026.08.19")
-    monkeypatch.setattr(app, "fetch_latest_version", lambda: "2026.09.10")
+    monkeypatch.setattr(app, "fetch_latest_version", lambda **kw: "2026.09.10")
     monkeypatch.setattr(app, "detect_install_method", lambda path: ("package", None))
 
     result = app.Api().check_for_update()
@@ -233,7 +235,7 @@ def test_check_for_update_is_quiet_when_offline(monkeypatch):
     monkeypatch.setattr(app, "find_ytdlp", lambda: "/usr/local/bin/yt-dlp")
     monkeypatch.setattr(app, "ytdlp_version", lambda path: "2026.08.19")
 
-    def offline():
+    def offline(**kw):
         raise OSError("no network")
     monkeypatch.setattr(app, "fetch_latest_version", offline)
 
@@ -262,7 +264,7 @@ def test_run_update_streams_output_and_reports_success(monkeypatch):
     monkeypatch.setattr(app, "find_ytdlp", lambda: "/fake/yt-dlp")
     monkeypatch.setattr(app, "detect_install_method", lambda path: ("standalone", None))
     # stand-in for `yt-dlp -U`: prints two lines and exits 0
-    monkeypatch.setattr(app, "update_command", lambda m, p, i=None: ["sh", "-c", "echo line one; echo line two"])
+    monkeypatch.setattr(app, "update_command", lambda m, p, i=None, channel="stable": ["sh", "-c", "echo line one; echo line two"])
     monkeypatch.setattr(app, "ytdlp_version", lambda path: "2026.09.10")
 
     api = app.Api()
@@ -279,7 +281,7 @@ def test_run_update_streams_output_and_reports_success(monkeypatch):
 def test_run_update_reports_nonzero_exit_as_failure(monkeypatch):
     monkeypatch.setattr(app, "find_ytdlp", lambda: "/fake/yt-dlp")
     monkeypatch.setattr(app, "detect_install_method", lambda path: ("standalone", None))
-    monkeypatch.setattr(app, "update_command", lambda m, p, i=None: ["sh", "-c", "echo nope; exit 3"])
+    monkeypatch.setattr(app, "update_command", lambda m, p, i=None, channel="stable": ["sh", "-c", "echo nope; exit 3"])
     monkeypatch.setattr(app, "ytdlp_version", lambda path: "2026.08.19")
 
     api = app.Api()
@@ -320,3 +322,63 @@ def test_update_done_fires_even_if_reading_output_blows_up(monkeypatch, tmp_path
     api._run_update()
     done = [p for e, p in events if e == "ytdlp-update-done"]
     assert len(done) == 1 and done[0]["success"] is False and "boom" in done[0]["error"]
+
+
+# --- update channels (#30) -------------------------------------------------------
+
+def test_standalone_switches_channel_with_update_to():
+    assert app.update_command("standalone", "/usr/local/bin/yt-dlp", channel="stable") == ["/usr/local/bin/yt-dlp", "-U"]
+    assert app.update_command("standalone", "/usr/local/bin/yt-dlp", channel="nightly") == [
+        "/usr/local/bin/yt-dlp", "--update-to", "nightly@latest"]
+    assert app.update_command("standalone", "/usr/local/bin/yt-dlp", channel="master") == [
+        "/usr/local/bin/yt-dlp", "--update-to", "master@latest"]
+
+
+def test_packaged_installs_ignore_the_channel(monkeypatch):
+    monkeypatch.setattr(app.shutil, "which", lambda n: "/opt/homebrew/bin/brew" if n == "brew" else None)
+    assert app.update_command("homebrew", "/opt/homebrew/bin/yt-dlp", channel="nightly") == [
+        "/opt/homebrew/bin/brew", "upgrade", "yt-dlp"]
+    assert app.update_command("pip", "/x/bin/yt-dlp", "/x/bin/python3", channel="nightly") == [
+        "/x/bin/python3", "-m", "pip", "install", "--upgrade", "yt-dlp"]
+
+
+@pytest.mark.parametrize("settings,expected", [
+    (None, "stable"), ({}, "stable"), ({"debug": {}}, "stable"),
+    ({"debug": {"updateChannel": "nightly"}}, "nightly"),
+    ({"debug": {"updateChannel": "master"}}, "master"),
+    ({"debug": {"updateChannel": "nonsense"}}, "stable"),
+])
+def test_update_channel_from_settings(settings, expected):
+    assert app.update_channel(settings) == expected
+
+
+def test_each_channel_has_its_own_release_feed(monkeypatch):
+    seen = []
+    monkeypatch.setattr(app, "fetch_latest_version", lambda timeout=5, channel="stable": seen.append(channel) or "2026.09.10")
+    monkeypatch.setattr(app, "find_ytdlp", lambda: "/usr/local/bin/yt-dlp")
+    monkeypatch.setattr(app, "detect_install_method", lambda p: ("standalone", None))
+    api = app.Api()
+    result = api.check_for_update("2026.08.19", {"debug": {"updateChannel": "nightly"}})
+    assert seen == ["nightly"] and result["channel"] == "nightly" and result["channelApplies"] is True
+    assert app.RELEASE_APIS["nightly"].endswith("yt-dlp-nightly-builds/releases/latest")
+
+
+def test_channel_does_not_apply_to_a_packaged_install(monkeypatch):
+    monkeypatch.setattr(app, "fetch_latest_version", lambda timeout=5, channel="stable": "2026.09.10")
+    monkeypatch.setattr(app, "find_ytdlp", lambda: "/opt/homebrew/bin/yt-dlp")
+    monkeypatch.setattr(app, "detect_install_method", lambda p: ("homebrew", None))
+    result = app.Api().check_for_update("2026.08.19", {"debug": {"updateChannel": "nightly"}})
+    assert result["channelApplies"] is False
+
+
+def test_update_runs_the_channel_the_settings_ask_for(monkeypatch):
+    seen = []
+    monkeypatch.setattr(app, "find_ytdlp", lambda: "/usr/local/bin/yt-dlp")
+    monkeypatch.setattr(app, "detect_install_method", lambda p: ("standalone", None))
+    monkeypatch.setattr(app, "update_command",
+                        lambda m, p, i=None, channel="stable": seen.append(channel) or ["sh", "-c", "true"])
+    api = app.Api()
+    api.window = None
+    api._emit = lambda ev, payload: None
+    api._run_update(app.update_channel({"debug": {"updateChannel": "master"}}))
+    assert seen == ["master"]
