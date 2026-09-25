@@ -61,6 +61,11 @@
 
   .nav-item {
     display: flex;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    font-family: inherit;
     align-items: center;
     gap: 8px;
     padding: 7px 10px;
@@ -74,6 +79,15 @@
   .nav-item.active {
     background: var(--accent);
     color: #fff;
+  }
+  .nav-item:focus-visible,
+  .seg button:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
   .nav-item .dot-icon {
     width: 6px; height: 6px; border-radius: 50%;
@@ -657,10 +671,12 @@
   <div class="app">
     <div class="sidebar">
       <div class="sidebar-title">yt-dlp</div>
-      <div class="nav-item active" data-tab="download"><span class="dot-icon"></span>Download</div>
-      <div class="nav-item" data-tab="advanced"><span class="dot-icon"></span>Advanced</div>
-      <div class="nav-item" data-tab="log"><span class="dot-icon"></span>Log</div>
-      <div class="nav-item" data-tab="history"><span class="dot-icon"></span>History</div>
+      <div role="tablist" aria-label="Sections">
+      <button type="button" role="tab" class="nav-item active" data-tab="download" title="⌘1 / Ctrl+1" aria-selected="true" aria-controls="tab-download"><span class="dot-icon"></span>Download</button>
+      <button type="button" role="tab" class="nav-item" data-tab="advanced" title="⌘2 / Ctrl+2" aria-selected="false" aria-controls="tab-advanced"><span class="dot-icon"></span>Advanced</button>
+      <button type="button" role="tab" class="nav-item" data-tab="log" title="⌘3 / Ctrl+3" aria-selected="false" aria-controls="tab-log"><span class="dot-icon"></span>Log</button>
+      <button type="button" role="tab" class="nav-item" data-tab="history" title="⌘4 / Ctrl+4" aria-selected="false" aria-controls="tab-history"><span class="dot-icon"></span>History</button>
+      </div>
       <div class="sidebar-spacer"></div>
       <div class="status-block">
         <div class="status-line status-line-clickable" id="ytdlpStatusLine" title="Click to check for updates"><span class="status-dot" id="ytdlpDot"></span><span id="ytdlpText">Checking…</span></div>
@@ -681,7 +697,7 @@
 
         <div class="field">
           <label>URLs <span class="hint-inline">(one per line)</span></label>
-          <textarea id="urlInput" class="url-input" rows="3" placeholder="https://youtube.com/watch?v=..." autofocus></textarea>
+          <textarea id="urlInput" class="url-input" rows="3" placeholder="https://youtube.com/watch?v=..." title="⌘↩ / Ctrl+Enter to download · Esc to clear" autofocus></textarea>
         </div>
 
         <div class="preview" id="preview" hidden>
@@ -777,7 +793,7 @@
         </div>
 
         <div class="actions">
-          <button class="btn-primary" id="downloadBtn">Download</button>
+          <button class="btn-primary" id="downloadBtn" title="⌘↩ / Ctrl+Enter">Download</button>
         </div>
         <div class="form-error" id="downloadError" hidden></div>
 
@@ -806,22 +822,22 @@
           </div>
         </div>
         <div class="advanced-body">
-          <div class="advanced-nav" id="advancedNav">
-            <div class="nav-item active" data-adv="format"><span class="dot-icon"></span>Format &amp; Quality</div>
-            <div class="nav-item" data-adv="filename"><span class="dot-icon"></span>Filename &amp; Output</div>
-            <div class="nav-item" data-adv="playlist"><span class="dot-icon"></span>Playlist</div>
-            <div class="nav-item" data-adv="live"><span class="dot-icon"></span>Live Streams</div>
-            <div class="nav-item" data-adv="subtitles"><span class="dot-icon"></span>Subtitles</div>
-            <div class="nav-item" data-adv="thumbnail"><span class="dot-icon"></span>Thumbnail &amp; Metadata</div>
-            <div class="nav-item" data-adv="audio"><span class="dot-icon"></span>Audio Extraction</div>
-            <div class="nav-item" data-adv="network"><span class="dot-icon"></span>Network</div>
-            <div class="nav-item" data-adv="auth"><span class="dot-icon"></span>Authentication &amp; Cookies</div>
-            <div class="nav-item" data-adv="sponsorblock"><span class="dot-icon"></span>SponsorBlock</div>
-            <div class="nav-item" data-adv="geo"><span class="dot-icon"></span>Geo-restriction</div>
-            <div class="nav-item" data-adv="postrun"><span class="dot-icon"></span>Post-run Command</div>
-            <div class="nav-item" data-adv="debug"><span class="dot-icon"></span>Debug &amp; Logging</div>
-            <div class="nav-item" data-adv="notifications"><span class="dot-icon"></span>Notifications</div>
-            <div class="nav-item" data-adv="extra"><span class="dot-icon"></span>Extra Arguments</div>
+          <div class="advanced-nav" id="advancedNav" role="tablist" aria-label="Advanced settings">
+            <button type="button" role="tab" class="nav-item active" data-adv="format" aria-selected="true" aria-controls="adv-format"><span class="dot-icon"></span>Format &amp; Quality</button>
+            <button type="button" role="tab" class="nav-item" data-adv="filename" aria-selected="false" aria-controls="adv-filename"><span class="dot-icon"></span>Filename &amp; Output</button>
+            <button type="button" role="tab" class="nav-item" data-adv="playlist" aria-selected="false" aria-controls="adv-playlist"><span class="dot-icon"></span>Playlist</button>
+            <button type="button" role="tab" class="nav-item" data-adv="live" aria-selected="false" aria-controls="adv-live"><span class="dot-icon"></span>Live Streams</button>
+            <button type="button" role="tab" class="nav-item" data-adv="subtitles" aria-selected="false" aria-controls="adv-subtitles"><span class="dot-icon"></span>Subtitles</button>
+            <button type="button" role="tab" class="nav-item" data-adv="thumbnail" aria-selected="false" aria-controls="adv-thumbnail"><span class="dot-icon"></span>Thumbnail &amp; Metadata</button>
+            <button type="button" role="tab" class="nav-item" data-adv="audio" aria-selected="false" aria-controls="adv-audio"><span class="dot-icon"></span>Audio Extraction</button>
+            <button type="button" role="tab" class="nav-item" data-adv="network" aria-selected="false" aria-controls="adv-network"><span class="dot-icon"></span>Network</button>
+            <button type="button" role="tab" class="nav-item" data-adv="auth" aria-selected="false" aria-controls="adv-auth"><span class="dot-icon"></span>Authentication &amp; Cookies</button>
+            <button type="button" role="tab" class="nav-item" data-adv="sponsorblock" aria-selected="false" aria-controls="adv-sponsorblock"><span class="dot-icon"></span>SponsorBlock</button>
+            <button type="button" role="tab" class="nav-item" data-adv="geo" aria-selected="false" aria-controls="adv-geo"><span class="dot-icon"></span>Geo-restriction</button>
+            <button type="button" role="tab" class="nav-item" data-adv="postrun" aria-selected="false" aria-controls="adv-postrun"><span class="dot-icon"></span>Post-run Command</button>
+            <button type="button" role="tab" class="nav-item" data-adv="debug" aria-selected="false" aria-controls="adv-debug"><span class="dot-icon"></span>Debug &amp; Logging</button>
+            <button type="button" role="tab" class="nav-item" data-adv="notifications" aria-selected="false" aria-controls="adv-notifications"><span class="dot-icon"></span>Notifications</button>
+            <button type="button" role="tab" class="nav-item" data-adv="extra" aria-selected="false" aria-controls="adv-extra"><span class="dot-icon"></span>Extra Arguments</button>
           </div>
 
           <div class="advanced-content">
@@ -1512,20 +1528,27 @@
   // Tab navigation (scoped to the top-level sidebar only — the Advanced
   // sub-nav below also uses .nav-item for styling but is handled separately)
   function switchTab(tabName) {
-    document.querySelectorAll('.sidebar > .nav-item').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.nav-item[data-tab]').forEach(i => {
+      const on = i.dataset.tab === tabName;
+      i.classList.toggle('active', on);
+      i.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    document.querySelector(`.sidebar > .nav-item[data-tab="${tabName}"]`).classList.add('active');
     document.getElementById('tab-' + tabName).classList.add('active');
     if (tabName === 'history') refreshHistory();
   }
 
-  document.querySelectorAll('.sidebar > .nav-item').forEach(item => {
+  document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
     item.addEventListener('click', () => switchTab(item.dataset.tab));
   });
 
   // Advanced sub-navigation (one category visible at a time, independent scroll)
   function showAdvancedCategory(name) {
-    document.querySelectorAll('#advancedNav .nav-item').forEach(i => i.classList.toggle('active', i.dataset.adv === name));
+    document.querySelectorAll('#advancedNav .nav-item').forEach(i => {
+      const on = i.dataset.adv === name;
+      i.classList.toggle('active', on);
+      i.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
     document.querySelectorAll('.adv-category').forEach(c => c.classList.toggle('active', c.id === 'adv-' + name));
   }
 
@@ -2754,6 +2777,53 @@
     // stays silent if it can't reach GitHub.
     if (ytdlpFound) checkForUpdate(false);
   }
+
+  // --- Keyboard shortcuts ------------------------------------------------------
+  const TAB_ORDER = ['download', 'advanced', 'log', 'history'];
+
+  function isTyping(el) {
+    return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+  }
+
+  window.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+
+    // Cmd/Ctrl+Enter starts the download from anywhere, including mid-URL.
+    if (mod && e.key === 'Enter') {
+      e.preventDefault();
+      downloadBtn.click();
+      return;
+    }
+    if (mod && (e.key === 'l' || e.key === 'L')) {
+      e.preventDefault();
+      switchTab('download');
+      urlInput.focus();
+      urlInput.select();
+      return;
+    }
+    if (mod && !e.shiftKey && !e.altKey && TAB_ORDER[Number(e.key) - 1]) {
+      e.preventDefault();
+      switchTab(TAB_ORDER[Number(e.key) - 1]);
+      return;
+    }
+    if (e.key === 'Escape' && document.activeElement === urlInput) {
+      urlInput.value = '';
+      showDownloadError(null);
+      clearTimeout(previewTimer);
+      previewSeq++;
+      hidePreview();
+      return;
+    }
+    // Enter/Space on a focused tab button, which a <button> gives us for
+    // Enter but not reliably for Space without a type="button".
+    if ((e.key === ' ' || e.key === 'Enter') && !isTyping(document.activeElement)) {
+      const nav = document.activeElement && document.activeElement.closest('.nav-item');
+      if (nav) {
+        e.preventDefault();
+        nav.click();
+      }
+    }
+  });
 
   window.addEventListener('pywebviewready', init);
 </script>

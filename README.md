@@ -95,6 +95,16 @@ Firefox needs its own extension folder (`firefox-extension/`) since its manifest
 - URLs sent from the browser extension while the app is open are added to the box (Advanced → Notifications → *Browser extension* to have them start downloading immediately instead)
 - Desktop notification when the queue finishes (Advanced → Notifications, on by default) — one per batch with finished/failed counts, or the title when it's a single download. macOS via Notification Center; Linux needs `notify-send`.
 
+## Keyboard shortcuts
+
+| | |
+|---|---|
+| `⌘↩` / `Ctrl+Enter` | Download whatever is in the URL box |
+| `⌘L` / `Ctrl+L` | Jump to the Download tab and select the URL box |
+| `⌘1`–`⌘4` / `Ctrl+1`–`4` | Download / Advanced / Log / History |
+| `Esc` | Clear the URL box and its preview |
+| `Tab`, `Enter`, `Space` | Move between and activate the tabs on both sidebars |
+
 ## Running the tests
 
 Covers `build_args()` (the settings-dict-to-yt-dlp-argv translator — the highest-value target, since every Advanced-tab option flows through it), the `find_ytdlp`/`find_ffmpeg`/`find_js_runtime` candidate-list detection, the download queue, preview, history, profiles, notifications and update checker, and the frontend's settings helpers (`ui/utils.js`). Tests point `XDG_CONFIG_HOME` at a temp dir (`tests/conftest.py`), so they never touch your real `~/.config/ytdlp-gui`. Deliberately out of scope: anything needing a real browser extension load or an actual GUI window — those stay manual, same as the rest of this README.
